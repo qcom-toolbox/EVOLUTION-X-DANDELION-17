@@ -12,7 +12,7 @@ It is the Vanilla variant, without Google apps.
 > dread, dead PMICs, dead RAM, dead ICs, dead CPUs, dead LCD panels, broken touchscreens, dead
 > batteries, fried USB ports, any Xiaomi mischief, dead cats, dogs, goldfish, nuclear wars, or
 > you getting fired because your phone crashed during the night due to the instability of the
-> port.
+> port and your alarm didn't ring.
 
 This is an experimental port. Android 17 officially needs a 5.4+ kernel and a vendor from
 Android 12 or newer, but this build keeps the phone's **stock Android 10 vendor**
@@ -30,7 +30,8 @@ AOSP `android-15.0.0_r31`.
 | --- | --- |
 | Boots to setup wizard (`sys.boot_completed=1`) | ✅ verified on a real Redmi 9A |
 | Display, GPU (PowerVR), touch | ✅ UI renders and setup is usable |
-| Audio service (HAL 5.0 via restored `libaudiohal@5.0`) | ✅ starts; playback not tested yet |
+| Audio service (HAL 5.0 via restored `libaudiohal@5.0`) | ⚠️ service starts, but no sound |
+| Vibration | ❌ not working |
 | Wi-Fi | ✅ enabled; connecting not tested yet |
 | Cellular / SIM | ❔ not tested (SIM reported absent in the first test) |
 | Camera, Bluetooth, fingerprint, sensors | ❔ not tested |
