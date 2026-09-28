@@ -4,6 +4,16 @@ Build script, manifest and patches for **Evolution X 12.2 (Android 17)** on the 
 Redmi 9A (`dandelion`, MediaTek Helio G25 / MT6762). This is a full device build, not a GSI.
 It is the Vanilla variant, without Google apps.
 
+> ⚠️ **Highly experimental.** Putting the phone to sleep (screen off / suspend) crashes it.
+> Expect bugs, reboots and missing features. Don't use it as your daily phone.
+
+> **Disclaimer:** I am not responsible for: bricked devices, data loss, dead SD cards, dead
+> Xiaomi factory-line workers, cowboys, sleepless nights, marriage crises, general existential
+> dread, dead PMICs, dead RAM, dead ICs, dead CPUs, dead LCD panels, broken touchscreens, dead
+> batteries, fried USB ports, any Xiaomi mischief, dead cats, dogs, goldfish, nuclear wars, or
+> you getting fired because you thought that just because it runs Android 17, you could use
+> your Redmi 9A as an alarm clock.
+
 This is an experimental port. Android 17 officially needs a 5.4+ kernel and a vendor from
 Android 12 or newer, but this build keeps the phone's **stock Android 10 vendor**
 (MIUI V12.0.9.0) and its **prebuilt 4.9 kernel**. Patches across the platform make
@@ -26,6 +36,7 @@ AOSP `android-15.0.0_r31`.
 | Camera, Bluetooth, fingerprint, sensors | ❔ not tested |
 | Per-app data usage stats, tethering offload | ❌ need eBPF programs this kernel can't run |
 | MTK picture-quality HAL (`PQServiceHAL`) | ⚠️ crash-loops (display still works) |
+| Sleep / screen off (suspend) | ❌ crashes the phone |
 
 No prebuilt zip yet. It will come once a non-debug build has been tested.
 
