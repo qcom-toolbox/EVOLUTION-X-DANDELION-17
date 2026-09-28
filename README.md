@@ -11,8 +11,8 @@ It is the Vanilla variant, without Google apps.
 > Xiaomi factory-line workers, cowboys, sleepless nights, marriage crises, general existential
 > dread, dead PMICs, dead RAM, dead ICs, dead CPUs, dead LCD panels, broken touchscreens, dead
 > batteries, fried USB ports, any Xiaomi mischief, dead cats, dogs, goldfish, nuclear wars, or
-> you getting fired because you thought that just because it runs Android 17, you could use
-> your Redmi 9A as an alarm clock.
+> you getting fired because your phone crashed during the night due to the instability of the
+> port.
 
 This is an experimental port. Android 17 officially needs a 5.4+ kernel and a vendor from
 Android 12 or newer, but this build keeps the phone's **stock Android 10 vendor**
