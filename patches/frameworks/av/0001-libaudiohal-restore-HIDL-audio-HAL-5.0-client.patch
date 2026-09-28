@@ -1,0 +1,68 @@
+libaudiohal: restore the HIDL audio HAL 5.0 client
+
+Stock Android 10 vendors only provide android.hardware.audio@5.0. Without a
+matching libaudiohal, audioserver dereferences a null HAL in
+AudioFlinger::onFirstRef, and system_server hangs in AudioService until the
+Watchdog kills it. The client sources still carry the MAJOR_VERSION <= 5 paths.
+Also add HIDL 5.0 (last) to FactoryHal's version list.
+
+ media/libaudiohal/FactoryHal.cpp  |  3 ++-
+ media/libaudiohal/impl/Android.bp | 27 +++++++++++++++++++++++++++
+ 2 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/media/libaudiohal/FactoryHal.cpp b/media/libaudiohal/FactoryHal.cpp
+index 2c30693..48d143b 100644
+--- a/media/libaudiohal/FactoryHal.cpp
++++ b/media/libaudiohal/FactoryHal.cpp
+@@ -50,11 +50,12 @@ using InterfaceName = std::pair<std::string, std::string>;
+  * This list need to keep sync with AudioHalVersionInfo.VERSIONS in
+  * media/java/android/media/AudioHalVersionInfo.java.
+  */
+-static const std::array<AudioHalVersionInfo, 4> sAudioHALVersions = {
++static const std::array<AudioHalVersionInfo, 5> sAudioHALVersions = {
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::AIDL, 1, 0),
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 7, 1),
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 7, 0),
+     AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 6, 0),
++    AudioHalVersionInfo(AudioHalVersionInfo::Type::HIDL, 5, 0),  // Local: legacy vendors
+ };
+ 
+ static const std::map<AudioHalVersionInfo::Type, InterfaceName> sDevicesHALInterfaces = {
+diff --git a/media/libaudiohal/impl/Android.bp b/media/libaudiohal/impl/Android.bp
+index 00f3929..0c9ad6e 100644
+--- a/media/libaudiohal/impl/Android.bp
++++ b/media/libaudiohal/impl/Android.bp
+@@ -82,6 +82,33 @@ cc_defaults {
+     ],
+ }
+ 
++// Local: restored for legacy Android 10 (audio HAL 5.0) vendors
++cc_library_shared {
++    name: "libaudiohal@5.0",
++    defaults: [
++        "libaudiohal_default",
++        "libaudiohal_hidl_default",
++    ],
++    srcs: [
++        ":audio_core_hal_client_sources",
++        ":audio_effect_hidl_hal_client_sources",
++        "EffectsFactoryHalEntry.cpp",
++    ],
++    shared_libs: [
++        "android.hardware.audio.common@5.0",
++        "android.hardware.audio.common@5.0-util",
++        "android.hardware.audio.effect@5.0",
++        "android.hardware.audio.effect@5.0-util",
++        "android.hardware.audio@5.0",
++        "android.hardware.audio@5.0-util",
++    ],
++    cflags: [
++        "-DMAJOR_VERSION=5",
++        "-DMINOR_VERSION=0",
++        "-include common/all-versions/VersionMacro.h",
++    ],
++}
++
+ cc_library_shared {
+     name: "libaudiohal@6.0",
+     defaults: [

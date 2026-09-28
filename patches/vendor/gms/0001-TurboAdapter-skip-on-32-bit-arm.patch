@@ -1,0 +1,28 @@
+gms: skip TurboAdapter on 32-bit arm targets
+
+Its JNI lib is 64-bit only and breaks Kati on TARGET_ARCH=arm (dandelion).
+
+ system_ext/packages/privileged_apps/TurboAdapter/Android.mk | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/system_ext/packages/privileged_apps/TurboAdapter/Android.mk b/system_ext/packages/privileged_apps/TurboAdapter/Android.mk
+index e04d255..1a64665 100644
+--- a/system_ext/packages/privileged_apps/TurboAdapter/Android.mk
++++ b/system_ext/packages/privileged_apps/TurboAdapter/Android.mk
+@@ -18,6 +18,10 @@
+ 
+ LOCAL_PATH := $(call my-dir)
+ 
++# libpowerstatshaldataprovider only exists for 64-bit targets; skip on
++# 32-bit-only (arm) devices, which build vanilla anyway.
++ifneq ($(TARGET_ARCH),arm)
++
+ include $(CLEAR_VARS)
+ LOCAL_MODULE := TurboAdapter
+ LOCAL_MODULE_TAGS := optional
+@@ -33,3 +37,5 @@ LOCAL_PRIVILEGED_MODULE := true
+ LOCAL_JNI_SHARED_LIBRARIES := libpowerstatshaldataprovider
+ LOCAL_MODULE_SUFFIX := $(COMMON_ANDROID_PACKAGE_SUFFIX)
+ include $(BUILD_PREBUILT)
++
++endif

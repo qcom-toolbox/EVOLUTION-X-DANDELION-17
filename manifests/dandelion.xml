@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="alg810" fetch="https://github.com/alg810" revision="13" />
+
+  <!-- Redmi 9A (dandelion): Android 13 LineageOS trees, forward-ported to A17 locally -->
+  <project path="device/xiaomi/dandelion" name="device_xiaomi_dandelion" remote="alg810" />
+  <project path="vendor/xiaomi/dandelion" name="vendor_xiaomi_dandelion" remote="alg810" clone-depth="1" />
+
+  <!-- VNDK 29 for the stock Android 10 vendor; dropped from AOSP in A16, last shipped in A15 -->
+  <project path="prebuilts/vndk/v29" name="platform/prebuilts/vndk/v29" remote="aosp" revision="refs/tags/android-15.0.0_r31" clone-depth="1" />
+</manifest>

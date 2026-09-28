@@ -1,0 +1,29 @@
+HintManagerService: don't NPE without an AIDL PowerHAL
+
+With no AIDL IPower (HIDL-only legacy vendor), mSupportInfo stayed null and the
+constructor dereferenced mSupportInfo.headroom, crash-looping system_server.
+Report 'nothing supported' instead.
+
+ .../java/com/android/server/power/hint/HintManagerService.java   | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/services/core/java/com/android/server/power/hint/HintManagerService.java b/services/core/java/com/android/server/power/hint/HintManagerService.java
+index 5d9e51289..791537c48 100644
+--- a/services/core/java/com/android/server/power/hint/HintManagerService.java
++++ b/services/core/java/com/android/server/power/hint/HintManagerService.java
+@@ -331,6 +331,15 @@ public final class HintManagerService extends SystemService {
+                 throw new IllegalStateException("Could not contact PowerHAL!", e);
+             }
+         }
++        if (mSupportInfo == null) {
++            // Local: no AIDL PowerHAL (e.g. legacy HIDL-only vendor) - report nothing supported.
++            mSupportInfo = new SupportInfo();
++            mSupportInfo.usesSessions = false;
++            mSupportInfo.headroom = new SupportInfo.HeadroomSupportInfo();
++            mSupportInfo.headroom.isCpuSupported = false;
++            mSupportInfo.headroom.isGpuSupported = false;
++            mSupportInfo.compositionData = new SupportInfo.CompositionDataSupportInfo();
++        }
+         if (mSupportInfo.headroom.isCpuSupported) {
+             mCpuHeadroomCache = new HeadroomCache<>(2, mSupportInfo.headroom.cpuMinIntervalMillis);
+             mUidToLastUserModeJiffies = new ArrayMap<>();

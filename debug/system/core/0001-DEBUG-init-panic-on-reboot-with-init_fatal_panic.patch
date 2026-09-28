@@ -1,0 +1,24 @@
+DEBUG ONLY (not applied by build.sh): with androidboot.init_fatal_panic=true, turn
+every reboot into a kernel panic so MTK expdb keeps the log.
+
+ init/reboot_utils.cpp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/init/reboot_utils.cpp b/init/reboot_utils.cpp
+index 92049ca..02948a4 100644
+--- a/init/reboot_utils.cpp
++++ b/init/reboot_utils.cpp
+@@ -104,6 +104,13 @@ void __attribute__((noreturn)) RebootSystem(unsigned int cmd, const std::string&
+                                             const std::string& reboot_reason) {
+     LOG(INFO) << "Reboot ending, jumping to kernel";
+ 
++    // Local debug aid: with androidboot.init_fatal_panic=true, turn every
++    // reboot into a kernel panic so the reason survives in the MTK expdb log.
++    if (init_fatal_panic) {
++        LOG(ERROR) << "init_fatal_panic: panicking instead of reboot to '" << rebootTarget << "'";
++        android::base::WriteStringToFile("c", PROC_SYSRQ);
++    }
++
+     if (!IsRebootCapable()) {
+         // On systems where init does not have the capability of rebooting the
+         // device, just exit cleanly.

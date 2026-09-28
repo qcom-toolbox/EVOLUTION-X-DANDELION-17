@@ -1,0 +1,323 @@
+dandelion: forward-port to Evolution X 12.2 (Android 17)
+
+Keeps the stock Android 10 vendor (BUILD_WITHOUT_VENDOR) and prebuilt 4.9 kernel.
+- Evolution X flags (Vanilla, 720x1600, blur/quick tap/face unlock off), Qualcomm
+  trees excluded from Soong analysis
+- A-only (AB_OTA_UPDATER false), unquoted TARGET_RECOVERY_PIXEL_FORMAT, system/product
+  sized to content (dynamic partitions), BUILD_BROKEN_MISSING_REQUIRED_MODULES
+- libui legacy_gralloc (vendor has gralloc mapper 2.1 / allocator 2.0)
+- VNDK v29 APEX and libaudiohal@5.0 packages; InProcessNetworkStack removed (gone in A17)
+- ro.bpf.allow_legacy_kernel, sys.usb.controller=musb-hdrc, USB state seed rc
+- A17 build.prop override keys (BuildDesc/BuildFingerprint)
+- light HAL: drop removed <hardware/lights.h>; libshim_showlogo ported to A17 libgui
+- sepolicy: coredomain/system_file_type for system-side HALs, -isolated_app_all
+- remove vendorsetup.sh (it deleted and re-cloned frameworks/opt/telephony)
+
+ BoardConfig.mk                     | 13 ++++++++++---
+ device.mk                          | 16 ++++++++++++----
+ libshims/libshim_showlogo.cpp      | 37 ++++++++++++++++++++++++++-----------
+ light/Light.h                      |  1 -
+ lineage_dandelion.mk               | 33 +++++++++++++++++++++------------
+ rootdir/etc/init.dandelion.usb.rc  |  6 ++++++
+ sepolicy/private/dt2w_event.te     |  2 +-
+ sepolicy/private/hal_mms_server.te |  4 ++--
+ sepolicy/private/mtk_hal_light.te  |  4 ++--
+ sepolicy/private/mtk_hal_mms.te    |  2 +-
+ system.prop                        |  6 ++++++
+ vendorsetup.sh                     |  8 --------
+ 12 files changed, 87 insertions(+), 45 deletions(-)
+
+diff --git a/BoardConfig.mk b/BoardConfig.mk
+index 1a94791..9db5a10 100644
+--- a/BoardConfig.mk
++++ b/BoardConfig.mk
+@@ -48,6 +48,8 @@ TARGET_NO_BOOTLOADER := true
+ TARGET_USES_UEFI := true
+ 
+ # Build
++# FaceUnlock / TurboAdapter only ship 64-bit libs; this is a 32-bit-only target
++BUILD_BROKEN_MISSING_REQUIRED_MODULES := true
+ BUILD_BROKEN_DUP_RULES := true
+ BUILD_BROKEN_USES_BUILD_COPY_HEADERS := true
+ BUILD_BROKEN_VINTF_PRODUCT_COPY_FILES := true
+@@ -118,9 +120,8 @@ BOARD_RECOVERYIMAGE_PARTITION_SIZE := 67108864
+ BOARD_DTBOIMG_PARTITION_SIZE := 8388608
+ BOARD_CACHEIMAGE_PARTITION_SIZE := 452984832
+ BOARD_CACHEIMAGE_FILE_SYSTEM_TYPE := ext4
+-BOARD_PRODUCTIMAGE_PARTITION_SIZE := 1490853888
++# Dynamic partitions: size system/product to content (A17 system > 1.4G)
+ BOARD_PRODUCTIMAGE_FILE_SYSTEM_TYPE := ext4
+-BOARD_SYSTEMIMAGE_PARTITION_SIZE := 1490853888
+ BOARD_SYSTEMIMAGE_FILE_SYSTEM_TYPE := ext4
+ BOARD_USERDATAIMAGE_PARTITION_SIZE := 118154574848
+ BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
+@@ -174,9 +175,15 @@ TARGET_SYSTEM_PROP += $(DEVICE_PATH)/system.prop
+ # Recovery
+ TARGET_NO_RECOVERY := false
+ TARGET_RECOVERY_FSTAB := $(DEVICE_PATH)/rootdir/etc/fstab.mt6765
+-TARGET_RECOVERY_PIXEL_FORMAT := "RGBX_8888"
++# A-only device (A17 defaults AB_OTA_UPDATER to true)
++AB_OTA_UPDATER := false
++
++TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
+ TARGET_RECOVERY_UI_BLANK_UNBLANK_ON_INIT := true
+ BOARD_INCLUDE_RECOVERY_DTBO := true
+ BOARD_USES_RECOVERY_AS_BOOT := false
+ BOARD_HAS_NO_SELECT_BUTTON := true
+ BOARD_HAS_LARGE_FILESYSTEM := true
++
++# Local: stock Android 10 vendor only has gralloc mapper 2.1 / allocator 2.0
++$(call soong_config_set_bool,libui,legacy_gralloc,true)
+diff --git a/device.mk b/device.mk
+index 8799e24..720caac 100644
+--- a/device.mk
++++ b/device.mk
+@@ -56,6 +56,10 @@ DEVICE_PACKAGE_OVERLAYS += \
+     $(DEVICE_PATH)/overlay-nad
+ 
+ # Ramdisk
++# VNDK v29 APEX for the stock Android 10 vendor (linkerconfig needs it)
++PRODUCT_PACKAGES += \
++    com.android.vndk.v29
++
+ PRODUCT_PACKAGES += \
+     init.mt6762.rc \
+     init.mt6765.rc \
+@@ -150,10 +154,6 @@ PRODUCT_PACKAGES += \
+     PresencePolling \
+     RcsService
+ 
+-# Do not spin up a separate process for the network stack, use an in-process APK.
+-PRODUCT_PACKAGES += InProcessNetworkStack
+-PRODUCT_PACKAGES += com.android.tethering.inprocess
+-
+ # WiFi
+ PRODUCT_PACKAGES += \
+     WifiOverlay \
+@@ -203,3 +203,11 @@ PRODUCT_COPY_FILES += \
+ PRODUCT_PACKAGES += \
+     libshim_showlogo \
+     libshim_vtservice
++
++# Local: audio HAL 5.0 client for the stock Android 10 vendor
++PRODUCT_PACKAGES += \
++    libaudiohal@5.0
++
++# A17 USB: the stock vendor usb rc restores sys.usb.config from sys.usb.state
++PRODUCT_COPY_FILES += \
++    $(LOCAL_PATH)/rootdir/etc/init.dandelion.usb.rc:$(TARGET_COPY_OUT_SYSTEM)/etc/init/init.dandelion.usb.rc
+diff --git a/libshims/libshim_showlogo.cpp b/libshims/libshim_showlogo.cpp
+index 6376137..f47978f 100644
+--- a/libshims/libshim_showlogo.cpp
++++ b/libshims/libshim_showlogo.cpp
+@@ -1,4 +1,5 @@
+ #include <gui/SurfaceComposerClient.h>
++#include <gui/SurfaceControl.h>
+ 
+ using namespace android;
+ 
+@@ -9,26 +10,40 @@ void _ZN7android21SurfaceComposerClient11Transaction20setDisplayProjectionERKNS_
+   t->setDisplayProjection(token, static_cast<ui::Rotation>(orientation), layerStackRect, displayRect);
+  }
+ 
+-void _ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijRKNS_2spINS_7IBinderEEENS_13LayerMetadataEPj(const String8& name, uint32_t w, uint32_t h, PixelFormat format, uint32_t flags, const sp<IBinder>& parentHandle, LayerMetadata metadata, uint32_t* outTransformHint);
+-void _ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijPNS_14SurfaceControlENS_13LayerMetadataE(const String8& name, uint32_t w, uint32_t h, PixelFormat format, uint32_t flags, SurfaceControl* parent, LayerMetadata metadata) {
+-  _ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijRKNS_2spINS_7IBinderEEENS_13LayerMetadataEPj(name, w, h, format, flags, nullptr, metadata, nullptr);
+- }
+-
+ void _ZN7android14SurfaceControlD0Ev(void);
+ 
+ void _ZN7android14SurfaceControl7releaseEv(void) {
+   _ZN7android14SurfaceControlD0Ev();
+  }
+ 
+-void _ZN7android21SurfaceComposerClient20getStaticDisplayInfoERKNS_2spINS_7IBinderEEEPNS_2ui17StaticDisplayInfoE(void);
+-
+-void _ZN7android21SurfaceComposerClient14getDisplayInfoERKNS_2spINS_7IBinderEEEPNS_11DisplayInfoE(void) {
+-  _ZN7android21SurfaceComposerClient20getStaticDisplayInfoERKNS_2spINS_7IBinderEEEPNS_2ui17StaticDisplayInfoE();
+- }
+-
+ void _ZN7android14SurfaceControl10getSurfaceEv(void);
+ 
+ void _ZNK7android14SurfaceControl10getSurfaceEv(void) {
+   _ZN7android14SurfaceControl10getSurfaceEv();
+  }
+ }
++
++// Q-era SurfaceComposerClient::createSurface(name, w, h, format, flags,
++// SurfaceControl* parent, LayerMetadata): forward to the current overload,
++// which takes the parent's handle instead.
++sp<SurfaceControl> shim_createSurface(SurfaceComposerClient* self, const String8& name,
++                                      uint32_t w, uint32_t h, PixelFormat format,
++                                      uint32_t flags, SurfaceControl* parent,
++                                      LayerMetadata metadata)
++    __asm__("_ZN7android21SurfaceComposerClient13createSurfaceERKNS_7String8EjjijPNS_14SurfaceControlENS_13LayerMetadataE");
++sp<SurfaceControl> shim_createSurface(SurfaceComposerClient* self, const String8& name,
++                                      uint32_t w, uint32_t h, PixelFormat format,
++                                      uint32_t flags, SurfaceControl* parent,
++                                      LayerMetadata metadata) {
++    return self->createSurface(name, w, h, format, static_cast<int32_t>(flags),
++                               parent ? parent->getHandle() : nullptr, metadata);
++}
++
++// Q-era static SurfaceComposerClient::getDisplayInfo(token, DisplayInfo*).
++// The DisplayInfo struct no longer exists, so report failure instead of
++// writing a layout the caller does not expect.
++status_t shim_getDisplayInfo(const sp<IBinder>& display, void* info)
++    __asm__("_ZN7android21SurfaceComposerClient14getDisplayInfoERKNS_2spINS_7IBinderEEEPNS_11DisplayInfoE");
++status_t shim_getDisplayInfo(const sp<IBinder>&, void*) {
++    return NO_INIT;
++}
+diff --git a/light/Light.h b/light/Light.h
+index 4427c39..6bb5e7b 100644
+--- a/light/Light.h
++++ b/light/Light.h
+@@ -18,7 +18,6 @@
+ #define ANDROID_HARDWARE_LIGHT_V2_0_LIGHT_H
+ 
+ #include <android/hardware/light/2.0/ILight.h>
+-#include <hardware/lights.h>
+ #include <hidl/Status.h>
+ #include <map>
+ #include <mutex>
+diff --git a/lineage_dandelion.mk b/lineage_dandelion.mk
+index 6b70cc7..a1f5fd3 100644
+--- a/lineage_dandelion.mk
++++ b/lineage_dandelion.mk
+@@ -18,11 +18,25 @@
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/aosp_base.mk)
+ 
+-# Lineage stuff
+-TARGET_BOOT_ANIMATION_RES := 720
+-TARGET_USES_BLUR := true
+-
+-$(call inherit-product, vendor/lineage/config/common.mk)
++# Evolution X: vanilla (2 GB RAM, 32-bit userspace), no heavy effects on PowerVR GE8320.
++# Must be set before common_full_phone.mk: it evaluates these (?=, ifeq) when inherited.
++EVO_BUILD_TYPE := Unofficial
++WITH_GMS := false
++TARGET_SCREEN_WIDTH := 720
++TARGET_SCREEN_HEIGHT := 1600
++TARGET_SUPPORTS_QUICK_TAP := false
++TARGET_SUPPORTS_GFU := false
++TARGET_ENABLE_BLUR := false
++
++# Lineage / Evolution X stuff
++$(call inherit-product, vendor/lineage/config/common_full_phone.mk)
++
++# Skip Qualcomm trees in soong analysis (unused on MTK, saves RAM)
++PRODUCT_SOURCE_ROOT_DIRS += \
++    -device/qcom \
++    -hardware/qcom \
++    -hardware/qcom-caf \
++    -vendor/qcom
+ 
+ # Inherit from garden device makefile
+ $(call inherit-product, $(LOCAL_PATH)/device.mk)
+@@ -37,12 +51,7 @@ PRODUCT_MANUFACTURER := xiaomi
+ TARGET_VENDOR := xiaomi
+ TARGET_VENDOR_PRODUCT_NAME := dandelion
+ PRODUCT_BUILD_PROP_OVERRIDES += \
+-    PRIVATE_BUILD_DESC="raven-user 12 SP2A.220405.004 8233519 release-keys"
++    BuildDesc="raven-user 12 SP2A.220405.004 8233519 release-keys" \
++    BuildFingerprint=google/raven/raven:12/SP2A.220405.004/8233519:user/release-keys
+ 
+ PRODUCT_GMS_CLIENTID_BASE := android-xiaomi
+-
+-# Set BUILD_FINGERPRINT variable to be picked up by both system and vendor build.prop
+-BUILD_FINGERPRINT := google/raven/raven:12/SP2A.220405.004/8233519:user/release-keys
+-
+-PRODUCT_PROPERTY_OVERRIDES += \
+-    ro.build.fingerprint=$(BUILD_FINGERPRINT)
+diff --git a/rootdir/etc/init.dandelion.usb.rc b/rootdir/etc/init.dandelion.usb.rc
+new file mode 100644
+index 0000000..14e447b
+--- /dev/null
++++ b/rootdir/etc/init.dandelion.usb.rc
+@@ -0,0 +1,6 @@
++# The stock Android 10 vendor init.mt6765.usb.rc does
++#   setprop sys.usb.config none; setprop sys.usb.config ${sys.usb.state}
++# when persist.vendor.radio.port_index loads. On A17 sys.usb.state is still unset
++# then, so USB ends up "none" (no adb/MTP). Seed it with the build default.
++on post-fs
++    setprop sys.usb.state ${persist.sys.usb.config:-mtp}
+diff --git a/sepolicy/private/dt2w_event.te b/sepolicy/private/dt2w_event.te
+index cc88686..f9a21c6 100644
+--- a/sepolicy/private/dt2w_event.te
++++ b/sepolicy/private/dt2w_event.te
+@@ -1,4 +1,4 @@
+-type dt2w_event, domain;
++type dt2w_event, domain, coredomain;
+ type dt2w_event_exec, exec_type, system_file_type, file_type;
+ 
+ init_daemon_domain(dt2w_event)
+diff --git a/sepolicy/private/hal_mms_server.te b/sepolicy/private/hal_mms_server.te
+index 4419036..28ae852 100644
+--- a/sepolicy/private/hal_mms_server.te
++++ b/sepolicy/private/hal_mms_server.te
+@@ -1,3 +1,3 @@
+ attribute hal_mms_server;
+-binder_call({appdomain -isolated_app}, hal_mms_server)
+-binder_call(hal_mms_server, {appdomain -isolated_app})
+\ No newline at end of file
++binder_call({appdomain -isolated_app_all}, hal_mms_server)
++binder_call(hal_mms_server, {appdomain -isolated_app_all})
+\ No newline at end of file
+diff --git a/sepolicy/private/mtk_hal_light.te b/sepolicy/private/mtk_hal_light.te
+index cd3d096..1bb2800 100644
+--- a/sepolicy/private/mtk_hal_light.te
++++ b/sepolicy/private/mtk_hal_light.te
+@@ -1,5 +1,5 @@
+-type mtk_hal_light, domain;
+-type mtk_hal_light_exec, exec_type, file_type;
++type mtk_hal_light, domain, coredomain;
++type mtk_hal_light_exec, exec_type, system_file_type, file_type;
+ init_daemon_domain(mtk_hal_light)
+ 
+ hwbinder_use(mtk_hal_light)
+diff --git a/sepolicy/private/mtk_hal_mms.te b/sepolicy/private/mtk_hal_mms.te
+index 6ff9080..6c01cf2 100644
+--- a/sepolicy/private/mtk_hal_mms.te
++++ b/sepolicy/private/mtk_hal_mms.te
+@@ -15,4 +15,4 @@ add_hwservice(gmscore_app, mtk_hal_mms_hwservice)
+ binder_call(gmscore_app, mtk_hal_mms)
+ binder_call(mtk_hal_mms, gmscore_app)
+ 
+-allow { appdomain -isolated_app }  mtk_hal_mms_hwservice:hwservice_manager find;
++allow { appdomain -isolated_app_all }  mtk_hal_mms_hwservice:hwservice_manager find;
+diff --git a/system.prop b/system.prop
+index fe36936..ceacd15 100644
+--- a/system.prop
++++ b/system.prop
+@@ -12,6 +12,9 @@ Build.BRAND=MTK
+ # Boot
+ sys.vendor.shutdown.waittime=500
+ 
++# eBPF: stock 4.9 kernel, let netbpfload run in legacy mode (skips 4.14+ programs)
++ro.bpf.allow_legacy_kernel=true
++
+ # Camera
+ persist.camera.HAL3.enabled=1
+ persist.vendor.camera.privapp.list=org.codeaurora.snapcam,com.android.camera,com.google.camera
+@@ -229,3 +232,6 @@ ro.com.google.ime.corner_key_r=35
+ persist.dbg.volte_avail_ovr=1
+ persist.dbg.vt_avail_ovr=1
+ persist.dbg.wfc_avail_ovr=1
++
++# USB gadget controller (A17 init.usb.configfs.rc binds UDC to ${sys.usb.controller})
++sys.usb.controller=musb-hdrc
+diff --git a/vendorsetup.sh b/vendorsetup.sh
+deleted file mode 100644
+index 014aa17..0000000
+--- a/vendorsetup.sh
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# For Cloning Vendor Tree
+-https://github.com/Vimal227/vendor_xiaomi_dandelion.git vendor/xiaomi/dandelion
+-
+-# For Cloning Arrow Os IMS Framework
+-rm -rf frameworks/opt/telephony
+-rm -rf frameworks/opt/net/ims
+-git clone https://github.com/ArrowOS/android_frameworks_opt_telephony.git -b arrow-13.0 frameworks/opt/telephony
+-git clone https://github.com/ArrowOS/android_frameworks_opt_net_ims.git -b arrow-13.0 frameworks/opt/net/ims

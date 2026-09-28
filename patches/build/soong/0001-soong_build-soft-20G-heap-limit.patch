@@ -1,0 +1,39 @@
+From 904e5d2873b63d377b67eb8f9db1f82e864f3d0b Mon Sep 17 00:00:00 2001
+From: qcom-toolbox <169756160+qcom-toolbox@users.noreply.github.com>
+Date: Sat, 26 Sep 2026 22:02:15 +0200
+Subject: [PATCH] soong_build: soft 20G heap limit
+
+On a 30G RAM host soong_build grows to ~58G (RAM + swap) during
+analysis and gets OOM-killed. A Go memory limit makes the GC collect
+harder; peak drops to ~25G. soong_build runs under env -i, so
+GOMEMLIMIT can't be passed from the environment.
+---
+ cmd/soong_build/main.go | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/cmd/soong_build/main.go b/cmd/soong_build/main.go
+index 335d3d8..2b7c2fe 100644
+--- a/cmd/soong_build/main.go
++++ b/cmd/soong_build/main.go
+@@ -22,6 +22,7 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"runtime"
++	"runtime/debug"
+ 	"strings"
+ 	"time"
+ 
+@@ -316,6 +317,10 @@ func parseAvailableEnv() map[string]string {
+ func main() {
+ 	flag.Parse()
+ 
++	// Local: soft heap cap so the GC works harder on 30G RAM hosts
++	// (env -i drops GOMEMLIMIT, so set it here).
++	debug.SetMemoryLimit(20 << 30)
++
+ 	if cmdlineArgs.Memprofile == "" {
+ 		// Go enables memory profile collection automatically if any references
+ 		// are linked in to the binary.
+-- 
+2.53.0
+

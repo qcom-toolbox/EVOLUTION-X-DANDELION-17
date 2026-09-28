@@ -1,0 +1,141 @@
+linkerconfig: default VNDK/sanitizer variables to empty
+
+Variables::GetValue() treats empty as undefined, and Var() without a default
+aborts. With a VNDK vendor, the bootstrap run happens before the (non-bootstrap)
+VNDK APEX is mounted, and SANITIZER_DEFAULT_* is empty whenever the build has no
+sanitizer.libraries.txt, so linkerconfig aborted and nothing on /vendor could
+link. MergeLibs() already skips empty entries.
+
+ contents/namespace/productdefault.cc | 10 +++++-----
+ contents/namespace/vendordefault.cc  |  8 ++++----
+ contents/namespace/vndk.cc           |  2 +-
+ contents/namespace/vndkinsystem.cc   |  2 +-
+ contents/section/apexdefault.cc      |  6 +++---
+ contents/section/sectionbuilder.cc   |  6 +++---
+ 6 files changed, 17 insertions(+), 17 deletions(-)
+
+diff --git a/contents/namespace/productdefault.cc b/contents/namespace/productdefault.cc
+index 52f9fed..87d2f1c 100644
+--- a/contents/namespace/productdefault.cc
++++ b/contents/namespace/productdefault.cc
+@@ -41,17 +41,17 @@ Namespace BuildProductNamespace(const Context& ctx, const std::string& name) {
+   AddLlndkLibraries(ctx, &ns, VndkUserPartition::Product);
+   if (android::linkerconfig::modules::IsProductVndkVersionDefined()) {
+     ns.GetLink(ctx.GetSystemNamespaceName())
+-        .AddSharedLib(Var("SANITIZER_DEFAULT_PRODUCT"));
++        .AddSharedLib(Var("SANITIZER_DEFAULT_PRODUCT", ""));
+     if (ctx.IsSystemSection() || ctx.IsUnrestrictedSection()) {
+       ns.GetLink("vndk_product")
+-          .AddSharedLib(Var("VNDK_SAMEPROCESS_LIBRARIES_PRODUCT"));
++          .AddSharedLib(Var("VNDK_SAMEPROCESS_LIBRARIES_PRODUCT", ""));
+     } else {
+       ns.GetLink("vndk").AddSharedLib(
+-          {Var("VNDK_SAMEPROCESS_LIBRARIES_PRODUCT"),
+-           Var("VNDK_CORE_LIBRARIES_PRODUCT")});
++          {Var("VNDK_SAMEPROCESS_LIBRARIES_PRODUCT", ""),
++           Var("VNDK_CORE_LIBRARIES_PRODUCT", "")});
+       if (android::linkerconfig::modules::IsVndkInSystemNamespace()) {
+         ns.GetLink("vndk_in_system")
+-            .AddSharedLib(Var("VNDK_USING_CORE_VARIANT_LIBRARIES"));
++            .AddSharedLib(Var("VNDK_USING_CORE_VARIANT_LIBRARIES", ""));
+       }
+     }
+   }
+diff --git a/contents/namespace/vendordefault.cc b/contents/namespace/vendordefault.cc
+index a866839..c2bb393 100644
+--- a/contents/namespace/vendordefault.cc
++++ b/contents/namespace/vendordefault.cc
+@@ -54,12 +54,12 @@ Namespace BuildVendorNamespace([[maybe_unused]] const Context& ctx,
+ 
+   if (android::linkerconfig::modules::IsVendorVndkVersionDefined()) {
+     ns.GetLink(ctx.GetSystemNamespaceName())
+-        .AddSharedLib(Var("SANITIZER_DEFAULT_VENDOR"));
+-    ns.GetLink("vndk").AddSharedLib({Var("VNDK_SAMEPROCESS_LIBRARIES_VENDOR"),
+-                                     Var("VNDK_CORE_LIBRARIES_VENDOR")});
++        .AddSharedLib(Var("SANITIZER_DEFAULT_VENDOR", ""));
++    ns.GetLink("vndk").AddSharedLib({Var("VNDK_SAMEPROCESS_LIBRARIES_VENDOR", ""),
++                                     Var("VNDK_CORE_LIBRARIES_VENDOR", "")});
+     if (android::linkerconfig::modules::IsVndkInSystemNamespace()) {
+       ns.GetLink("vndk_in_system")
+-          .AddSharedLib(Var("VNDK_USING_CORE_VARIANT_LIBRARIES"));
++          .AddSharedLib(Var("VNDK_USING_CORE_VARIANT_LIBRARIES", ""));
+     }
+   }
+ 
+diff --git a/contents/namespace/vndk.cc b/contents/namespace/vndk.cc
+index d821eb7..b306923 100644
+--- a/contents/namespace/vndk.cc
++++ b/contents/namespace/vndk.cc
+@@ -112,7 +112,7 @@ Namespace BuildVndkNamespace([[maybe_unused]] const Context& ctx,
+   if (ctx.IsProductSection() || ctx.IsVendorSection()) {
+     if (android::linkerconfig::modules::IsVndkInSystemNamespace()) {
+       ns.GetLink("vndk_in_system")
+-          .AddSharedLib(Var("VNDK_USING_CORE_VARIANT_LIBRARIES"));
++          .AddSharedLib(Var("VNDK_USING_CORE_VARIANT_LIBRARIES", ""));
+     }
+   }
+ 
+diff --git a/contents/namespace/vndkinsystem.cc b/contents/namespace/vndkinsystem.cc
+index 3b3bde9..47c503d 100644
+--- a/contents/namespace/vndkinsystem.cc
++++ b/contents/namespace/vndkinsystem.cc
+@@ -46,7 +46,7 @@ Namespace BuildVndkInSystemNamespace([[maybe_unused]] const Context& ctx) {
+   ns.AddSearchPath(Var("SYSTEM_EXT") + "/${LIB}");
+ 
+   if (android::linkerconfig::modules::IsVndkInSystemNamespace()) {
+-    ns.AddAllowedLib(Var("VNDK_USING_CORE_VARIANT_LIBRARIES"));
++    ns.AddAllowedLib(Var("VNDK_USING_CORE_VARIANT_LIBRARIES", ""));
+   }
+ 
+   AddLlndkLibraries(ctx,
+diff --git a/contents/section/apexdefault.cc b/contents/section/apexdefault.cc
+index ea9753b..69e28c5 100644
+--- a/contents/section/apexdefault.cc
++++ b/contents/section/apexdefault.cc
+@@ -144,13 +144,13 @@ Section BuildApexDefaultSection(Context& ctx, const ApexInfo& apex_info) {
+         ctx.GetSystemNamespaceName(),
+         std::bind(BuildApexPlatformNamespace,
+                   ctx),  // "system" should be available
+-        SharedLibs{{Var("SANITIZER_DEFAULT_" + user_partition_suffix)}},
++        SharedLibs{{Var("SANITIZER_DEFAULT_" + user_partition_suffix, "")}},
+     }};
+     libs_providers[":vndk"] = GetVndkProvider(ctx, user_partition);
+     libs_providers[":vndksp"] = {LibProvider{
+         "vndk",
+         std::bind(BuildVndkNamespace, ctx, user_partition),
+-        SharedLibs{{Var("VNDK_SAMEPROCESS_LIBRARIES_" + user_partition_suffix)}},
++        SharedLibs{{Var("VNDK_SAMEPROCESS_LIBRARIES_" + user_partition_suffix, "")}},
+     }};
+   } else if (apex_info.InProduct() || apex_info.InVendor()) {
+     // vendor or product partitions don't need this because they link LLNDK
+@@ -160,7 +160,7 @@ Section BuildApexDefaultSection(Context& ctx, const ApexInfo& apex_info) {
+         ctx.GetSystemNamespaceName(),
+         std::bind(BuildApexPlatformNamespace,
+                   ctx),  // "system" should be available
+-        SharedLibs{{Var("SANITIZER_LIBRARIES_LLNDK")}},
++        SharedLibs{{Var("SANITIZER_LIBRARIES_LLNDK", "")}},
+     }};
+   }
+ 
+diff --git a/contents/section/sectionbuilder.cc b/contents/section/sectionbuilder.cc
+index c314948..5772756 100644
+--- a/contents/section/sectionbuilder.cc
++++ b/contents/section/sectionbuilder.cc
+@@ -74,14 +74,14 @@ std::vector<LibProvider> GetVndkProvider(const Context& ctx,
+       "vndk",
+       std::bind(BuildVndkNamespace, ctx, partition),
+       SharedLibs{
+-          std::vector{Var("VNDK_SAMEPROCESS_LIBRARIES_" + partition_suffix),
+-                      Var("VNDK_CORE_LIBRARIES_" + partition_suffix)}},
++          std::vector{Var("VNDK_SAMEPROCESS_LIBRARIES_" + partition_suffix, ""),
++                      Var("VNDK_CORE_LIBRARIES_" + partition_suffix, "")}},
+   });
+   if (modules::IsVndkInSystemNamespace()) {
+     provider.push_back(LibProvider{
+         "vndk_in_system",
+         std::bind(BuildVndkInSystemNamespace, ctx),
+-        SharedLibs{std::vector{Var("VNDK_USING_CORE_VARIANT_LIBRARIES")}},
++        SharedLibs{std::vector{Var("VNDK_USING_CORE_VARIANT_LIBRARIES", "")}},
+     });
+   }
+   return provider;

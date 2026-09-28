@@ -1,0 +1,81 @@
+DEBUG ONLY (not applied by build.sh), on top of the release device patch: boot logger to /metadata and /data, permissive SELinux, printk.devkmsg=on, sync-mounted /metadata. Add your own adb key via PRODUCT_ADB_KEYS if you need adb before setup.
+
+diff --git a/rootdir/etc/fstab.mt6762 b/rootdir/etc/fstab.mt6762
+index 95ea539..d42dee4 100644
+--- a/rootdir/etc/fstab.mt6762
++++ b/rootdir/etc/fstab.mt6762
+@@ -12,7 +12,7 @@ vendor                                                  /vendor
+ product                                                 /product                 ext4    ro                                                                                                                  wait,logical,first_stage_mount
+ 
+ # Core Partitions
+-/dev/block/platform/bootdevice/by-name/md_udc           /metadata                ext4    noatime,nosuid,nodev                                                                                                wait,formattable,first_stage_mount
++/dev/block/platform/bootdevice/by-name/md_udc           /metadata                ext4    noatime,nosuid,nodev,sync                                                                                                wait,formattable,first_stage_mount
+ /dev/block/platform/bootdevice/by-name/cache            /cache                   ext4    noatime,nosuid,nodev,noauto_da_alloc                                                                                wait,check,formattable
+ /dev/block/platform/bootdevice/by-name/userdata         /data                    f2fs    noatime,nosuid,nodev,nodiscard,flush_merge,reserve_root=134217,resgid=1065,alloc_mode=reuse,fsync_mode=nobarrier    wait,check,quota,reservedsize=128M,formattable,checkpoint=fs
+ /dev/block/platform/bootdevice/by-name/recovery         /recovery                emmc    defaults                                                                                                            first_stage_mount,nofail
+diff --git a/rootdir/etc/fstab.mt6765 b/rootdir/etc/fstab.mt6765
+index 4288284..f70975b 100644
+--- a/rootdir/etc/fstab.mt6765
++++ b/rootdir/etc/fstab.mt6765
+@@ -12,7 +12,7 @@ vendor                                                  /vendor
+ product                                                 /product                 ext4    ro                                                                                                                  wait,logical,first_stage_mount
+ 
+ # Core Partitions
+-/dev/block/platform/bootdevice/by-name/md_udc           /metadata                ext4    noatime,nosuid,nodev                                                                                                wait,formattable,first_stage_mount
++/dev/block/platform/bootdevice/by-name/md_udc           /metadata                ext4    noatime,nosuid,nodev,sync                                                                                                wait,formattable,first_stage_mount
+ /dev/block/platform/bootdevice/by-name/cache            /cache                   ext4    noatime,nosuid,nodev,noauto_da_alloc                                                                                wait,check,formattable
+ /dev/block/platform/bootdevice/by-name/userdata         /data                    f2fs    noatime,nosuid,nodev,nodiscard,flush_merge,reserve_root=134217,resgid=1065,alloc_mode=reuse,fsync_mode=nobarrier    wait,check,quota,reservedsize=128M,formattable,checkpoint=fs
+ /dev/block/platform/bootdevice/by-name/recovery         /recovery                emmc    defaults                                                                                                            first_stage_mount,nofail
+diff --git a/rootdir/etc/bootlog.rc b/rootdir/etc/bootlog.rc
+new file mode 100644
+index 0000000..a974dc8
+--- /dev/null
++++ b/rootdir/etc/bootlog.rc
+@@ -0,0 +1,47 @@
++# Local debug: persist kernel log and logcat across reboots in /metadata/bootlog
++on early-init
++    mkdir /metadata/bootlog 0770 root system
++    start bootlog_kmsg
++
++on property:init.svc.logd=running
++    start bootlog_logcat
++
++service bootlog_kmsg /system/bin/sh -c "mv -f /metadata/bootlog/kmsg.txt /metadata/bootlog/kmsg.prev.txt; exec cat /dev/kmsg > /metadata/bootlog/kmsg.txt"
++    user root
++    group root
++    oneshot
++    disabled
++    seclabel u:r:su:s0
++
++service bootlog_logcat /system/bin/sh -c "mv -f /metadata/bootlog/logcat.txt /metadata/bootlog/logcat.prev.txt; exec /system/bin/logcat -b all -v threadtime > /metadata/bootlog/logcat.txt"
++    user root
++    group root
++    oneshot
++    disabled
++    seclabel u:r:su:s0
++
++service bootlog_sync /system/bin/sh -c "while true; do sync; sleep 1; done"
++    user root
++    group root
++    oneshot
++    disabled
++    seclabel u:r:su:s0
++
++on early-init
++    start bootlog_sync
++
++on post-fs-data
++    mkdir /data/bootlog 0770 root system
++    start bootlog_logcat_data
++
++service bootlog_logcat_data /system/bin/sh -c "mv -f /data/bootlog/logcat.txt /data/bootlog/logcat.prev.txt; exec /system/bin/logcat -b all -v threadtime > /data/bootlog/logcat.txt"
++    user root
++    group root
++    oneshot
++    disabled
++    seclabel u:r:su:s0
++
++# Local debug: stock A10 vendor usb rc restores sys.usb.config from
++# ${sys.usb.state}, which A17 hasn't set yet -> adb ends up "none".
++on post-fs
++    setprop sys.usb.state adb

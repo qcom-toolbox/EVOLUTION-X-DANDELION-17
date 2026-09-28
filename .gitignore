@@ -1,0 +1,6 @@
+evolution/
+releases/
+out/
+*.img
+*.zip
+*.part-*

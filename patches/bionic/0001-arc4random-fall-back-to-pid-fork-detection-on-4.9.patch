@@ -1,0 +1,59 @@
+arc4random: fall back to pid-based fork detection on kernels without MADV_WIPEONFORK
+
+MADV_WIPEONFORK is Linux 4.14+. On 4.9 (e.g. Redmi 9A) madvise() returns EINVAL
+and bionic aborted in every process, starting with init. On EINVAL, remember the
+pid and re-stir (zero rs) when it changes, like OpenBSD's arc4random_linux.h.
+No change on 4.14+ kernels.
+
+ libc/upstream-openbsd/android/include/arc4random.h | 23 ++++++++++++++++++++--
+ 1 file changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/libc/upstream-openbsd/android/include/arc4random.h b/libc/upstream-openbsd/android/include/arc4random.h
+index 1940398..17691d0 100644
+--- a/libc/upstream-openbsd/android/include/arc4random.h
++++ b/libc/upstream-openbsd/android/include/arc4random.h
+@@ -18,6 +18,7 @@
+  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+  */
+ 
++#include <errno.h>
+ #include <pthread.h>
+ #include <sys/mman.h>
+ #include <sys/prctl.h>
+@@ -41,8 +42,21 @@ static inline void _getentropy_fail(void) {
+   async_safe_fatal("getentropy failed: %m");
+ }
+ 
++// Set when the kernel lacks MADV_WIPEONFORK (< 4.14): detect forks by pid
++// instead, like OpenBSD's arc4random_linux.h.
++static int _rs_need_forkdetect;
++static pid_t _rs_pid;
++
+ static inline void _rs_forkdetect(void) {
+-  // Not needed thanks to the MADV_WIPEONFORK below.
++  // Normally not needed thanks to the MADV_WIPEONFORK below.
++  if (!_rs_need_forkdetect) return;
++
++  pid_t pid = getpid();
++  if (_rs_pid != pid) {
++    _rs_pid = pid;
++    // Zeroed rs_count forces a fresh getentropy() stir before any output.
++    if (rs) memset(rs, 0, sizeof(*rs));
++  }
+ }
+ 
+ static inline int _rs_allocate(struct _rs** rsp, struct _rsx** rsxp) {
+@@ -61,7 +75,12 @@ static inline int _rs_allocate(struct _rs** rsp, struct _rsx** rsxp) {
+ 
+   // Equivalent to OpenBSD's minherit(MAP_INHERIT_ZERO).
+   if (madvise(p, size, MADV_WIPEONFORK) == -1) {
+-    async_safe_fatal("arc4random data MADV_WIPEONFORK failed: %m");
++    if (errno != EINVAL) {
++      async_safe_fatal("arc4random data MADV_WIPEONFORK failed: %m");
++    }
++    // Kernel too old for MADV_WIPEONFORK: fall back to pid-based detection.
++    _rs_need_forkdetect = 1;
++    _rs_pid = getpid();
+   }
+ 
+   // Give the allocation a name to make tombstones more intelligible.

@@ -1,0 +1,21 @@
+ueventd: also import /vendor/ueventd.rc
+
+Pre-R vendors keep ueventd.rc at the legacy path, so none of their device node
+rules (e.g. /dev/ion, /dev/pvrsrvkm) were applied; the PowerVR driver could not
+open /dev/ion and SurfaceFlinger found no EGLConfig.
+
+ rootdir/ueventd.rc | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/rootdir/ueventd.rc b/rootdir/ueventd.rc
+index 80ef6a1..27771ae 100644
+--- a/rootdir/ueventd.rc
++++ b/rootdir/ueventd.rc
+@@ -1,5 +1,7 @@
+ import /vendor/etc/ueventd.rc
+ import /odm/etc/ueventd.rc
++# Local: pre-R vendors (e.g. stock Android 10) keep ueventd.rc at the legacy path
++import /vendor/ueventd.rc
+ 
+ firmware_directories /etc/firmware/ /odm/firmware/ /vendor/firmware/ /firmware/image/
+ uevent_socket_rcvbuf_size 16M

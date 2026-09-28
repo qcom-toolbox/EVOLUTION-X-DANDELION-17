@@ -1,0 +1,24 @@
+vndk: add com.android.vndk.v29
+
+Needed by linkerconfig for Android 10 (VNDK 29) vendors; built from
+prebuilts/vndk/v29 (android-15.0.0_r31, see manifest).
+
+ apex/Android.bp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/apex/Android.bp b/apex/Android.bp
+index baf8d19..ec7d687 100644
+--- a/apex/Android.bp
++++ b/apex/Android.bp
+@@ -63,3 +63,11 @@ apex_vndk {
+     vndk_version: "31",
+     system_ext_specific: true,
+ }
++
++// Local: VNDK v29 for legacy Android 10 vendors (e.g. dandelion stock vendor)
++apex_vndk {
++    name: "com.android.vndk.v29",
++    defaults: ["vndk-apex-defaults"],
++    vndk_version: "29",
++    system_ext_specific: true,
++}

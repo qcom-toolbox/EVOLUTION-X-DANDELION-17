@@ -1,0 +1,23 @@
+releasetools: tolerate a partition missing from target files
+
+_ReadPartitionPropFile() is documented to return '' when not found but indexed
+partition_map[name] unconditionally, so BUILD_WITHOUT_VENDOR targets (prebuilt
+stock vendor) crashed make_recovery_patch with KeyError: 'vendor'.
+
+ tools/releasetools/common.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tools/releasetools/common.py b/tools/releasetools/common.py
+index e5e2c96..bceee2f 100644
+--- a/tools/releasetools/common.py
++++ b/tools/releasetools/common.py
+@@ -1115,6 +1115,9 @@ class PartitionBuildProps(object):
+     """
+     data = ''
+     partition_map = PartitionMapFromTargetFiles(input_file)
++    if name not in partition_map:
++      # e.g. BUILD_WITHOUT_VENDOR targets have no VENDOR/ in target files
++      return data
+     for prop_file in ['{}/etc/build.prop'.format(partition_map[name]),
+                       '{}/build.prop'.format(partition_map[name])]:
+       try:
