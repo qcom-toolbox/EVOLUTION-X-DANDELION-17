@@ -1,4 +1,4 @@
-DEBUG ONLY (not applied by build.sh), on top of the release device patch: boot logger to /metadata (3 MB rotation, loops around kmsg EPIPE) and /data, permissive SELinux, printk.devkmsg=on, sync-mounted /metadata. Add your own adb key via PRODUCT_ADB_KEYS if you need adb before setup. /metadata is only ~18 MB: clean /metadata/bootlog from recovery after use.
+DEBUG ONLY (not applied by build.sh), on top of the release device patch: boot logger to /metadata (3 MB rotation, loops around kmsg EPIPE) and /data, permissive SELinux, printk.devkmsg=on, sync-mounted /metadata, adb state forced to adb. Add your own adb key via PRODUCT_ADB_KEYS if you need adb before setup. /metadata is only ~18 MB: clean /metadata/bootlog from recovery after use.
 
 diff --git a/rootdir/etc/fstab.mt6762 b/rootdir/etc/fstab.mt6762
 index 95ea539..d42dee4 100644

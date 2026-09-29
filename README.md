@@ -4,8 +4,8 @@ Build script, manifest and patches for **Evolution X 12.2 (Android 17)** on the 
 Redmi 9A (`dandelion`, MediaTek Helio G25 / MT6762). This is a full device build, not a GSI.
 It is the Vanilla variant, without Google apps.
 
-> ⚠️ **Highly experimental.** No sound or vibration yet, and waking the screen takes about
-> 2 seconds. Expect bugs, reboots and missing features. Don't use it as your daily phone.
+> ⚠️ **Highly experimental.** Waking the screen takes about 2 seconds, and a lot is still
+> untested (calls, camera, sensors). Expect bugs, reboots and missing features. Don't use it as your daily phone.
 
 > **Disclaimer:** I am not responsible for: bricked devices, data loss, dead SD cards, dead
 > Xiaomi factory-line workers, cowboys, sleepless nights, marriage crises, general existential
@@ -30,14 +30,14 @@ AOSP `android-15.0.0_r31`.
 | --- | --- |
 | Boots to setup wizard (`sys.boot_completed=1`) | ✅ verified on a real Redmi 9A |
 | Display, GPU (PowerVR), touch | ✅ UI renders and setup is usable |
-| Audio service (HAL 5.0 via restored `libaudiohal@5.0`) | ⚠️ service starts, but no sound |
-| Vibration | ❌ not working |
+| Sound (speaker, system sounds, media) | ✅ works (vendor audio HAL 5.0 via restored `libaudiohal@5.0`) |
+| Vibration | ✅ works (AIDL vibrator service over the LED-class vibrator) |
 | Wi-Fi | ✅ enabled; connecting not tested yet |
 | Cellular / SIM | ❔ not tested (SIM reported absent in the first test) |
 | Bluetooth | ✅ stack starts (no more crash loop); pairing not tested yet |
 | Camera, fingerprint, sensors | ❔ not tested |
 | Per-app data usage stats, tethering offload | ❌ need eBPF programs this kernel can't run |
-| MTK picture-quality HAL (`PQServiceHAL`) | ⚠️ crash-loops (display still works; its HIDL memory mapper can't be loaded yet) |
+| MTK picture-quality HAL (`PQServiceHAL`) | ✅ runs (was crash-looping) |
 | Screen off / wake | ✅ works; ~2 s after pressing power until the screen is back (backlight fade-in) |
 
 No prebuilt zip yet. It will come once a non-debug build has been tested.
@@ -60,7 +60,7 @@ Every patch has a header explaining it. In short:
 | `build/soong` | 20 GB soft heap limit for `soong_build` (30 GB RAM hosts). |
 | `vendor/gms` | Skips the 64-bit-only TurboAdapter on this 32-bit build. |
 | `packages/modules/Bluetooth` | Tolerates the MTK firmware rejecting `READ_DEFAULT_ERRONEOUS_DATA_REPORTING`. The stack crash-looped and kept resetting the shared Wi-Fi/BT chip. |
-| `device/xiaomi/dandelion` | The forward port itself: Evolution X flags, A-only, dynamic partition sizing, `legacy_gralloc` (gralloc 2.x vendor), USB controller and state, SELinux fixes, A17 API updates, and an AIDL backlight service (Android 17 no longer uses the vendor's HIDL lights HAL, so the screen stayed black after the first screen-off). |
+| `device/xiaomi/dandelion` | The forward port itself: Evolution X flags, A-only, dynamic partition sizing, `legacy_gralloc` (gralloc 2.x vendor), USB controller and state, SELinux fixes, A17 API updates, AIDL backlight and vibrator services (Android 17 no longer uses the vendor's HIDL lights/vibrator HALs, so the screen stayed black after the first screen-off and nothing vibrated), a `/system/lib/vndk-sp-29` symlink (the Android 10 `libhidlbase` loads the shared-memory mapper from there; without it the PQ HAL crash-looped and the OMX codecs failed, so no sound), and Codec2 re-enabled ahead of the vendor's OMX software codecs. |
 
 `debug/` holds the logging aids used during bring-up: a boot logger, permissive SELinux,
 `printk.devkmsg` and an `init` panic hook. `build.sh` does **not** apply them.

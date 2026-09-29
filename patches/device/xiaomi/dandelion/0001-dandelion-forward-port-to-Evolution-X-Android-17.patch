@@ -7,32 +7,43 @@ Keeps the stock Android 10 vendor (BUILD_WITHOUT_VENDOR) and prebuilt 4.9 kernel
   sized to content (dynamic partitions), BUILD_BROKEN_MISSING_REQUIRED_MODULES
 - libui legacy_gralloc (vendor has gralloc mapper 2.1 / allocator 2.0)
 - VNDK v29 APEX and libaudiohal@5.0 packages; InProcessNetworkStack removed (gone in A17)
-- aidl-light: AIDL ILights backlight service (A17 LightsService no longer uses HIDL
-  light@2.0; without it the screen stays black after the first screen-off)
-- HIDL ashmem allocator + mapper for the vendor PQ HAL
+- vndk-compat: /system/lib/vndk-sp-29 -> VNDK APEX symlink. The VNDK 29 libhidlbase
+  loads the ashmem IMapper from there; without it every vendor hidl_memory user
+  failed (PQ HAL crash loop, OMX codecs NO_MEMORY -> no sound)
+- aidl-light / aidl-vibrator: AIDL ILights (backlight) and IVibrator services. A17
+  no longer uses the vendor's HIDL light@2.0 / vibrator@1.0: the screen stayed black
+  after the first screen-off and nothing vibrated
+- HIDL ashmem allocator + mapper packages
+- codecs: drop the A13 props that disabled Codec2 and forced OMX; rank the vendor
+  OMX.google.* software codecs below Codec2
 - ro.bpf.allow_legacy_kernel, sys.usb.controller=musb-hdrc, USB state seed rc
 - A17 build.prop override keys (BuildDesc/BuildFingerprint)
 - light HAL: drop removed <hardware/lights.h>; libshim_showlogo ported to A17 libgui
 - sepolicy: coredomain/system_file_type for system-side HALs, -isolated_app_all
 - remove vendorsetup.sh (it deleted and re-cloned frameworks/opt/telephony)
 
- BoardConfig.mk                                     | 13 +++-
- aidl-light/Android.bp                              | 21 +++++
- .../android.hardware.light-service.dandelion.rc    |  9 +++
- .../android.hardware.light-service.dandelion.xml   |  7 ++
- aidl-light/service.cpp                             | 89 ++++++++++++++++++++++
- device.mk                                          | 28 ++++++-
- libshims/libshim_showlogo.cpp                      | 37 ++++++---
- light/Light.h                                      |  1 -
- lineage_dandelion.mk                               | 33 +++++---
- rootdir/etc/init.dandelion.usb.rc                  |  6 ++
- sepolicy/private/dt2w_event.te                     |  2 +-
- sepolicy/private/hal_mms_server.te                 |  4 +-
- sepolicy/private/mtk_hal_light.te                  |  4 +-
- sepolicy/private/mtk_hal_mms.te                    |  2 +-
- system.prop                                        |  6 ++
- vendorsetup.sh                                     |  8 --
- 16 files changed, 225 insertions(+), 45 deletions(-)
+ BoardConfig.mk                                     |  13 ++-
+ aidl-light/Android.bp                              |  21 ++++
+ .../android.hardware.light-service.dandelion.rc    |   9 ++
+ .../android.hardware.light-service.dandelion.xml   |   7 ++
+ aidl-light/service.cpp                             |  89 +++++++++++++++
+ aidl-vibrator/Android.bp                           |  21 ++++
+ .../android.hardware.vibrator-service.dandelion.rc |   9 ++
+ ...android.hardware.vibrator-service.dandelion.xml |   7 ++
+ aidl-vibrator/service.cpp                          | 125 +++++++++++++++++++++
+ device.mk                                          |  36 +++++-
+ libshims/libshim_showlogo.cpp                      |  37 ++++--
+ light/Light.h                                      |   1 -
+ lineage_dandelion.mk                               |  33 ++++--
+ rootdir/etc/init.dandelion.usb.rc                  |   6 +
+ sepolicy/private/dt2w_event.te                     |   2 +-
+ sepolicy/private/hal_mms_server.te                 |   4 +-
+ sepolicy/private/mtk_hal_light.te                  |   4 +-
+ sepolicy/private/mtk_hal_mms.te                    |   2 +-
+ system.prop                                        |  16 ++-
+ vendorsetup.sh                                     |   8 --
+ vndk-compat/Android.bp                             |  14 +++
+ 21 files changed, 415 insertions(+), 49 deletions(-)
 
 diff --git a/BoardConfig.mk b/BoardConfig.mk
 index 1a94791..9db5a10 100644
@@ -225,8 +236,194 @@ index 0000000..0b36bfc
 +    ABinderProcess_joinThreadPool();
 +    return EXIT_FAILURE;  // should not reach
 +}
+diff --git a/aidl-vibrator/Android.bp b/aidl-vibrator/Android.bp
+new file mode 100644
+index 0000000..553e402
+--- /dev/null
++++ b/aidl-vibrator/Android.bp
+@@ -0,0 +1,21 @@
++//
++// SPDX-FileCopyrightText: The LineageOS Project
++// SPDX-License-Identifier: Apache-2.0
++//
++// AIDL IVibrator (V1) for dandelion. Android 17's VibratorManagerService only uses
++// AIDL, and the stock Android 10 vendor only has HIDL vibrator@1.0, so without this
++// the phone never vibrates. Drives the LED-class vibrator in /sys/class/leds/vibrator.
++
++cc_binary {
++    name: "android.hardware.vibrator-service.dandelion",
++    system_ext_specific: true,
++    relative_install_path: "hw",
++    init_rc: ["android.hardware.vibrator-service.dandelion.rc"],
++    vintf_fragments: ["android.hardware.vibrator-service.dandelion.xml"],
++    srcs: ["service.cpp"],
++    shared_libs: [
++        "libbase",
++        "libbinder_ndk",
++        "android.hardware.vibrator-V1-ndk",
++    ],
++}
+diff --git a/aidl-vibrator/android.hardware.vibrator-service.dandelion.rc b/aidl-vibrator/android.hardware.vibrator-service.dandelion.rc
+new file mode 100644
+index 0000000..9248883
+--- /dev/null
++++ b/aidl-vibrator/android.hardware.vibrator-service.dandelion.rc
+@@ -0,0 +1,9 @@
++on early-boot
++    chown system system /sys/class/leds/vibrator/activate
++    chown system system /sys/class/leds/vibrator/duration
++    chown system system /sys/class/leds/vibrator/state
++
++service vendor.vibrator-aidl /system_ext/bin/hw/android.hardware.vibrator-service.dandelion
++    class hal
++    user system
++    group system
+diff --git a/aidl-vibrator/android.hardware.vibrator-service.dandelion.xml b/aidl-vibrator/android.hardware.vibrator-service.dandelion.xml
+new file mode 100644
+index 0000000..6cfc155
+--- /dev/null
++++ b/aidl-vibrator/android.hardware.vibrator-service.dandelion.xml
+@@ -0,0 +1,7 @@
++<manifest version="1.0" type="framework">
++    <hal format="aidl">
++        <name>android.hardware.vibrator</name>
++        <version>1</version>
++        <fqname>IVibrator/default</fqname>
++    </hal>
++</manifest>
+diff --git a/aidl-vibrator/service.cpp b/aidl-vibrator/service.cpp
+new file mode 100644
+index 0000000..f34b950
+--- /dev/null
++++ b/aidl-vibrator/service.cpp
+@@ -0,0 +1,125 @@
++/*
++ * SPDX-FileCopyrightText: The LineageOS Project
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <aidl/android/hardware/vibrator/BnVibrator.h>
++#include <android-base/file.h>
++#include <android-base/logging.h>
++#include <android/binder_manager.h>
++#include <android/binder_process.h>
++
++#include <chrono>
++#include <thread>
++
++using ::aidl::android::hardware::vibrator::BnVibrator;
++using ::aidl::android::hardware::vibrator::CompositeEffect;
++using ::aidl::android::hardware::vibrator::CompositePrimitive;
++using ::aidl::android::hardware::vibrator::Effect;
++using ::aidl::android::hardware::vibrator::EffectStrength;
++using ::aidl::android::hardware::vibrator::IVibratorCallback;
++using ::ndk::ScopedAStatus;
++
++namespace {
++
++constexpr char kActivate[] = "/sys/class/leds/vibrator/activate";
++constexpr char kDuration[] = "/sys/class/leds/vibrator/duration";
++
++ScopedAStatus unsupported() {
++    return ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++}
++
++bool write(const char* path, const std::string& value) {
++    if (android::base::WriteStringToFile(value, path)) return true;
++    PLOG(ERROR) << "Failed to write " << value << " to " << path;
++    return false;
++}
++
++class Vibrator : public BnVibrator {
++  public:
++    ScopedAStatus getCapabilities(int32_t* caps) override {
++        *caps = CAP_ON_CALLBACK | CAP_PERFORM_CALLBACK;
++        return ScopedAStatus::ok();
++    }
++
++    ScopedAStatus off() override {
++        write(kActivate, "0");
++        return ScopedAStatus::ok();
++    }
++
++    ScopedAStatus on(int32_t timeoutMs,
++                     const std::shared_ptr<IVibratorCallback>& callback) override {
++        if (timeoutMs <= 0) return off();
++        write(kDuration, std::to_string(timeoutMs));
++        write(kActivate, "1");
++        if (callback) {
++            std::thread([timeoutMs, callback] {
++                std::this_thread::sleep_for(std::chrono::milliseconds(timeoutMs));
++                callback->onComplete();
++            }).detach();
++        }
++        return ScopedAStatus::ok();
++    }
++
++    ScopedAStatus perform(Effect effect, EffectStrength strength,
++                          const std::shared_ptr<IVibratorCallback>& callback,
++                          int32_t* lengthMs) override {
++        int32_t ms;
++        switch (effect) {
++            case Effect::TICK: ms = 10; break;
++            case Effect::CLICK: ms = 20; break;
++            case Effect::POP: ms = 15; break;
++            case Effect::DOUBLE_CLICK: ms = 35; break;
++            case Effect::THUD:
++            case Effect::HEAVY_CLICK: ms = 30; break;
++            default: return unsupported();
++        }
++        if (strength == EffectStrength::LIGHT) ms = ms * 2 / 3;
++        if (strength == EffectStrength::STRONG) ms = ms * 3 / 2;
++        *lengthMs = ms;
++        return on(ms, callback);
++    }
++
++    ScopedAStatus getSupportedEffects(std::vector<Effect>* effects) override {
++        *effects = {Effect::TICK, Effect::CLICK, Effect::POP, Effect::DOUBLE_CLICK,
++                    Effect::THUD, Effect::HEAVY_CLICK};
++        return ScopedAStatus::ok();
++    }
++
++    ScopedAStatus setAmplitude(float) override { return unsupported(); }
++    ScopedAStatus setExternalControl(bool) override { return unsupported(); }
++    ScopedAStatus getCompositionDelayMax(int32_t*) override { return unsupported(); }
++    ScopedAStatus getCompositionSizeMax(int32_t*) override { return unsupported(); }
++    ScopedAStatus getSupportedPrimitives(std::vector<CompositePrimitive>* p) override {
++        p->clear();
++        return ScopedAStatus::ok();
++    }
++    ScopedAStatus getPrimitiveDuration(CompositePrimitive, int32_t*) override {
++        return unsupported();
++    }
++    ScopedAStatus compose(const std::vector<CompositeEffect>&,
++                          const std::shared_ptr<IVibratorCallback>&) override {
++        return unsupported();
++    }
++    ScopedAStatus getSupportedAlwaysOnEffects(std::vector<Effect>* effects) override {
++        effects->clear();
++        return ScopedAStatus::ok();
++    }
++    ScopedAStatus alwaysOnEnable(int32_t, Effect, EffectStrength) override {
++        return unsupported();
++    }
++    ScopedAStatus alwaysOnDisable(int32_t) override { return unsupported(); }
++};
++
++}  // namespace
++
++int main() {
++    ABinderProcess_setThreadPoolMaxThreadCount(0);
++    std::shared_ptr<Vibrator> vibrator = ndk::SharedRefBase::make<Vibrator>();
++    const std::string instance = std::string(Vibrator::descriptor) + "/default";
++    binder_status_t status =
++            AServiceManager_addService(vibrator->asBinder().get(), instance.c_str());
++    CHECK_EQ(status, STATUS_OK) << "Failed to register " << instance;
++    ABinderProcess_joinThreadPool();
++    return EXIT_FAILURE;  // should not reach
++}
 diff --git a/device.mk b/device.mk
-index 8799e24..c02a1bb 100644
+index 8799e24..54ee882 100644
 --- a/device.mk
 +++ b/device.mk
 @@ -56,6 +56,10 @@ DEVICE_PACKAGE_OVERLAYS += \
@@ -251,7 +448,7 @@ index 8799e24..c02a1bb 100644
  # WiFi
  PRODUCT_PACKAGES += \
      WifiOverlay \
-@@ -203,3 +203,23 @@ PRODUCT_COPY_FILES += \
+@@ -203,3 +203,31 @@ PRODUCT_COPY_FILES += \
  PRODUCT_PACKAGES += \
      libshim_showlogo \
      libshim_vtservice
@@ -271,6 +468,14 @@ index 8799e24..c02a1bb 100644
 +# AIDL lights (backlight) - A17 LightsService does not use HIDL light@2.0
 +PRODUCT_PACKAGES += \
 +    android.hardware.light-service.dandelion
++
++# AIDL vibrator - A17 VibratorManagerService does not use HIDL vibrator@1.0
++PRODUCT_PACKAGES += \
++    android.hardware.vibrator-service.dandelion
++
++# /system/lib/vndk-sp-29 -> VNDK APEX (VNDK 29 libhidlbase HAL search path)
++PRODUCT_PACKAGES += \
++    dandelion_vndk_sp_29_symlink
 +
 +# A17 USB: the stock vendor usb rc restores sys.usb.config from sys.usb.state
 +PRODUCT_COPY_FILES += \
@@ -456,7 +661,7 @@ index 6ff9080..6c01cf2 100644
 -allow { appdomain -isolated_app }  mtk_hal_mms_hwservice:hwservice_manager find;
 +allow { appdomain -isolated_app_all }  mtk_hal_mms_hwservice:hwservice_manager find;
 diff --git a/system.prop b/system.prop
-index fe36936..ceacd15 100644
+index fe36936..6fc9723 100644
 --- a/system.prop
 +++ b/system.prop
 @@ -12,6 +12,9 @@ Build.BRAND=MTK
@@ -469,13 +674,30 @@ index fe36936..ceacd15 100644
  # Camera
  persist.camera.HAL3.enabled=1
  persist.vendor.camera.privapp.list=org.codeaurora.snapcam,com.android.camera,com.google.camera
-@@ -229,3 +232,6 @@ ro.com.google.ime.corner_key_r=35
+@@ -103,10 +106,7 @@ ro.zram.mark_idle_delay_mins=60
+ ro.zram.first_wb_delay_mins=1440
+ ro.zram.periodic_wb_delay_hours=24
+ 
+-# OMX
+-debug.stagefright.omx_default_rank.sw-audio=1
+-debug.stagefright.omx_default_rank=0
+-debug.stagefright.ccodec=0
++# OMX (A17: Codec2 must stay enabled; see the omx_default_rank lines below)
+ 
+ # Blurs
+ ro.surface_flinger.supports_background_blur=1
+@@ -229,3 +229,11 @@ ro.com.google.ime.corner_key_r=35
  persist.dbg.volte_avail_ovr=1
  persist.dbg.vt_avail_ovr=1
  persist.dbg.wfc_avail_ovr=1
 +
 +# USB gadget controller (A17 init.usb.configfs.rc binds UDC to ${sys.usb.controller})
 +sys.usb.controller=musb-hdrc
++
++# Prefer Codec2 (mediaswcodec) over the stock vendor OMX.google.* software codecs:
++# vendor processes cannot map hidl_memory on A17, so OMX fails with NO_MEMORY.
++debug.stagefright.omx_default_rank.sw-audio=4096
++debug.stagefright.omx_default_rank.sw-other=4096
 diff --git a/vendorsetup.sh b/vendorsetup.sh
 deleted file mode 100644
 index 014aa17..0000000
@@ -490,3 +712,23 @@ index 014aa17..0000000
 -rm -rf frameworks/opt/net/ims
 -git clone https://github.com/ArrowOS/android_frameworks_opt_telephony.git -b arrow-13.0 frameworks/opt/telephony
 -git clone https://github.com/ArrowOS/android_frameworks_opt_net_ims.git -b arrow-13.0 frameworks/opt/net/ims
+diff --git a/vndk-compat/Android.bp b/vndk-compat/Android.bp
+new file mode 100644
+index 0000000..6277363
+--- /dev/null
++++ b/vndk-compat/Android.bp
+@@ -0,0 +1,14 @@
++//
++// SPDX-FileCopyrightText: The LineageOS Project
++// SPDX-License-Identifier: Apache-2.0
++//
++// The prebuilt Android 10 (VNDK 29) libhidlbase loads VNDK-SP passthrough HALs from
++// /system/lib/vndk-sp-29/hw/ (e.g. android.hidl.memory@1.0-impl.so, the ashmem
++// IMapper). Android 10 provided that path as a symlink into the VNDK APEX; Android 17
++// doesn't, so every vendor process mapping hidl_memory failed (PQ HAL, OMX codecs).
++
++install_symlink {
++    name: "dandelion_vndk_sp_29_symlink",
++    installed_location: "lib/vndk-sp-29",
++    symlink_target: "/apex/com.android.vndk.v29/lib",
++}
