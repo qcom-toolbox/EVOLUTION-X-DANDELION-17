@@ -4,8 +4,8 @@ Build script, manifest and patches for **Evolution X 12.2 (Android 17)** on the 
 Redmi 9A (`dandelion`, MediaTek Helio G25 / MT6762). This is a full device build, not a GSI.
 It is the Vanilla variant, without Google apps.
 
-> ⚠️ **Highly experimental.** Waking the screen takes about 2 seconds, and a lot is still
-> untested (calls, camera, sensors). Expect bugs, reboots and missing features. Don't use it as your daily phone.
+> ⚠️ **Highly experimental.** A lot is still untested (calls, camera, sensors), and
+> VoLTE is unlikely to work. Expect bugs, reboots and missing features. Don't use it as your daily phone.
 
 > **Disclaimer:** I am not responsible for: bricked devices, data loss, dead SD cards, dead
 > Xiaomi factory-line workers, cowboys, sleepless nights, marriage crises, general existential
@@ -32,13 +32,14 @@ AOSP `android-15.0.0_r31`.
 | Display, GPU (PowerVR), touch | ✅ UI renders and setup is usable |
 | Sound (speaker, system sounds, media) | ✅ works (vendor audio HAL 5.0 via restored `libaudiohal@5.0`) |
 | Vibration | ✅ works (AIDL vibrator service over the LED-class vibrator) |
-| Wi-Fi | ✅ enabled; connecting not tested yet |
-| Cellular / SIM | ❔ not tested (SIM reported absent in the first test) |
+| Wi-Fi | ✅ connects (wireless adb used over it during testing) |
+| SIM | ✅ both SIM slots detect and read their card |
+| Cellular network | ❔ the test phone finds no network (same on the previous ROM, likely hardware). VoLTE, needed for calls where 2G/3G are shut down, is not tested; the MTK IMS stack on Android 17 is unlikely to work yet |
 | Bluetooth | ✅ stack starts (no more crash loop); pairing not tested yet |
 | Camera, fingerprint, sensors | ❔ not tested |
 | Per-app data usage stats, tethering offload | ❌ need eBPF programs this kernel can't run |
 | MTK picture-quality HAL (`PQServiceHAL`) | ✅ runs (was crash-looping) |
-| Screen off / wake | ✅ works; ~2 s after pressing power until the screen is back (backlight fade-in) |
+| Screen off / wake | ✅ works |
 
 No prebuilt zip yet. It will come once a non-debug build has been tested.
 
