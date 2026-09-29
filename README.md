@@ -4,8 +4,8 @@ Build script, manifest and patches for **Evolution X 12.2 (Android 17)** on the 
 Redmi 9A (`dandelion`, MediaTek Helio G25 / MT6762). This is a full device build, not a GSI.
 It is the Vanilla variant, without Google apps.
 
-> ⚠️ **Highly experimental.** Putting the phone to sleep (screen off / suspend) crashes it.
-> Expect bugs, reboots and missing features. Don't use it as your daily phone.
+> ⚠️ **Highly experimental.** No sound or vibration yet, and waking the screen takes about
+> 2 seconds. Expect bugs, reboots and missing features. Don't use it as your daily phone.
 
 > **Disclaimer:** I am not responsible for: bricked devices, data loss, dead SD cards, dead
 > Xiaomi factory-line workers, cowboys, sleepless nights, marriage crises, general existential
@@ -34,10 +34,11 @@ AOSP `android-15.0.0_r31`.
 | Vibration | ❌ not working |
 | Wi-Fi | ✅ enabled; connecting not tested yet |
 | Cellular / SIM | ❔ not tested (SIM reported absent in the first test) |
-| Camera, Bluetooth, fingerprint, sensors | ❔ not tested |
+| Bluetooth | ✅ stack starts (no more crash loop); pairing not tested yet |
+| Camera, fingerprint, sensors | ❔ not tested |
 | Per-app data usage stats, tethering offload | ❌ need eBPF programs this kernel can't run |
-| MTK picture-quality HAL (`PQServiceHAL`) | ⚠️ crash-loops (display still works) |
-| Sleep / screen off (suspend) | ❌ crashes the phone |
+| MTK picture-quality HAL (`PQServiceHAL`) | ⚠️ crash-loops (display still works; its HIDL memory mapper can't be loaded yet) |
+| Screen off / wake | ✅ works; ~2 s after pressing power until the screen is back (backlight fade-in) |
 
 No prebuilt zip yet. It will come once a non-debug build has been tested.
 
@@ -58,7 +59,8 @@ Every patch has a header explaining it. In short:
 | `build/make` | releasetools tolerates the missing vendor partition. |
 | `build/soong` | 20 GB soft heap limit for `soong_build` (30 GB RAM hosts). |
 | `vendor/gms` | Skips the 64-bit-only TurboAdapter on this 32-bit build. |
-| `device/xiaomi/dandelion` | The forward port itself: Evolution X flags, A-only, dynamic partition sizing, `legacy_gralloc` (gralloc 2.x vendor), USB controller and state, SELinux fixes, A17 API updates. |
+| `packages/modules/Bluetooth` | Tolerates the MTK firmware rejecting `READ_DEFAULT_ERRONEOUS_DATA_REPORTING`. The stack crash-looped and kept resetting the shared Wi-Fi/BT chip. |
+| `device/xiaomi/dandelion` | The forward port itself: Evolution X flags, A-only, dynamic partition sizing, `legacy_gralloc` (gralloc 2.x vendor), USB controller and state, SELinux fixes, A17 API updates, and an AIDL backlight service (Android 17 no longer uses the vendor's HIDL lights HAL, so the screen stayed black after the first screen-off). |
 
 `debug/` holds the logging aids used during bring-up: a boot logger, permissive SELinux,
 `printk.devkmsg` and an `init` panic hook. `build.sh` does **not** apply them.

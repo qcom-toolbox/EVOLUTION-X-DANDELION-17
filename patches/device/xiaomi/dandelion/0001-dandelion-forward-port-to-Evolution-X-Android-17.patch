@@ -7,25 +7,32 @@ Keeps the stock Android 10 vendor (BUILD_WITHOUT_VENDOR) and prebuilt 4.9 kernel
   sized to content (dynamic partitions), BUILD_BROKEN_MISSING_REQUIRED_MODULES
 - libui legacy_gralloc (vendor has gralloc mapper 2.1 / allocator 2.0)
 - VNDK v29 APEX and libaudiohal@5.0 packages; InProcessNetworkStack removed (gone in A17)
+- aidl-light: AIDL ILights backlight service (A17 LightsService no longer uses HIDL
+  light@2.0; without it the screen stays black after the first screen-off)
+- HIDL ashmem allocator + mapper for the vendor PQ HAL
 - ro.bpf.allow_legacy_kernel, sys.usb.controller=musb-hdrc, USB state seed rc
 - A17 build.prop override keys (BuildDesc/BuildFingerprint)
 - light HAL: drop removed <hardware/lights.h>; libshim_showlogo ported to A17 libgui
 - sepolicy: coredomain/system_file_type for system-side HALs, -isolated_app_all
 - remove vendorsetup.sh (it deleted and re-cloned frameworks/opt/telephony)
 
- BoardConfig.mk                     | 13 ++++++++++---
- device.mk                          | 16 ++++++++++++----
- libshims/libshim_showlogo.cpp      | 37 ++++++++++++++++++++++++++-----------
- light/Light.h                      |  1 -
- lineage_dandelion.mk               | 33 +++++++++++++++++++++------------
- rootdir/etc/init.dandelion.usb.rc  |  6 ++++++
- sepolicy/private/dt2w_event.te     |  2 +-
- sepolicy/private/hal_mms_server.te |  4 ++--
- sepolicy/private/mtk_hal_light.te  |  4 ++--
- sepolicy/private/mtk_hal_mms.te    |  2 +-
- system.prop                        |  6 ++++++
- vendorsetup.sh                     |  8 --------
- 12 files changed, 87 insertions(+), 45 deletions(-)
+ BoardConfig.mk                                     | 13 +++-
+ aidl-light/Android.bp                              | 21 +++++
+ .../android.hardware.light-service.dandelion.rc    |  9 +++
+ .../android.hardware.light-service.dandelion.xml   |  7 ++
+ aidl-light/service.cpp                             | 89 ++++++++++++++++++++++
+ device.mk                                          | 28 ++++++-
+ libshims/libshim_showlogo.cpp                      | 37 ++++++---
+ light/Light.h                                      |  1 -
+ lineage_dandelion.mk                               | 33 +++++---
+ rootdir/etc/init.dandelion.usb.rc                  |  6 ++
+ sepolicy/private/dt2w_event.te                     |  2 +-
+ sepolicy/private/hal_mms_server.te                 |  4 +-
+ sepolicy/private/mtk_hal_light.te                  |  4 +-
+ sepolicy/private/mtk_hal_mms.te                    |  2 +-
+ system.prop                                        |  6 ++
+ vendorsetup.sh                                     |  8 --
+ 16 files changed, 225 insertions(+), 45 deletions(-)
 
 diff --git a/BoardConfig.mk b/BoardConfig.mk
 index 1a94791..9db5a10 100644
@@ -68,8 +75,158 @@ index 1a94791..9db5a10 100644
 +
 +# Local: stock Android 10 vendor only has gralloc mapper 2.1 / allocator 2.0
 +$(call soong_config_set_bool,libui,legacy_gralloc,true)
+diff --git a/aidl-light/Android.bp b/aidl-light/Android.bp
+new file mode 100644
+index 0000000..1b0bd3c
+--- /dev/null
++++ b/aidl-light/Android.bp
+@@ -0,0 +1,21 @@
++//
++// SPDX-FileCopyrightText: The LineageOS Project
++// SPDX-License-Identifier: Apache-2.0
++//
++// AIDL ILights (backlight only) for dandelion. Android 17's LightsService only
++// talks to AIDL, and this build keeps the stock Android 10 vendor (HIDL light@2.0),
++// so without this the backlight can't be restored after the first screen-off.
++
++cc_binary {
++    name: "android.hardware.light-service.dandelion",
++    system_ext_specific: true,
++    relative_install_path: "hw",
++    init_rc: ["android.hardware.light-service.dandelion.rc"],
++    vintf_fragments: ["android.hardware.light-service.dandelion.xml"],
++    srcs: ["service.cpp"],
++    shared_libs: [
++        "libbase",
++        "libbinder_ndk",
++        "android.hardware.light-V2-ndk",
++    ],
++}
+diff --git a/aidl-light/android.hardware.light-service.dandelion.rc b/aidl-light/android.hardware.light-service.dandelion.rc
+new file mode 100644
+index 0000000..9ca62b2
+--- /dev/null
++++ b/aidl-light/android.hardware.light-service.dandelion.rc
+@@ -0,0 +1,9 @@
++on early-boot
++    chown system system /sys/class/leds/lcd-backlight/brightness
++    chown system system /sys/class/leds/lcd-backlight/max_brightness
++
++service vendor.light-aidl /system_ext/bin/hw/android.hardware.light-service.dandelion
++    class hal
++    user system
++    group system
++    shutdown critical
+diff --git a/aidl-light/android.hardware.light-service.dandelion.xml b/aidl-light/android.hardware.light-service.dandelion.xml
+new file mode 100644
+index 0000000..fe62cbd
+--- /dev/null
++++ b/aidl-light/android.hardware.light-service.dandelion.xml
+@@ -0,0 +1,7 @@
++<manifest version="1.0" type="framework">
++    <hal format="aidl">
++        <name>android.hardware.light</name>
++        <version>2</version>
++        <fqname>ILights/default</fqname>
++    </hal>
++</manifest>
+diff --git a/aidl-light/service.cpp b/aidl-light/service.cpp
+new file mode 100644
+index 0000000..0b36bfc
+--- /dev/null
++++ b/aidl-light/service.cpp
+@@ -0,0 +1,89 @@
++/*
++ * SPDX-FileCopyrightText: The LineageOS Project
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <aidl/android/hardware/light/BnLights.h>
++#include <android-base/file.h>
++#include <android-base/logging.h>
++#include <android-base/strings.h>
++#include <android/binder_manager.h>
++#include <android/binder_process.h>
++
++#include <mutex>
++
++using ::aidl::android::hardware::light::BnLights;
++using ::aidl::android::hardware::light::HwLight;
++using ::aidl::android::hardware::light::HwLightState;
++using ::aidl::android::hardware::light::LightType;
++using ::ndk::ScopedAStatus;
++
++namespace {
++
++constexpr char kBrightness[] = "/sys/class/leds/lcd-backlight/brightness";
++constexpr char kMaxBrightness[] = "/sys/class/leds/lcd-backlight/max_brightness";
++constexpr int32_t kBacklightId = 0;
++
++uint32_t readMaxBrightness() {
++    std::string value;
++    if (android::base::ReadFileToString(kMaxBrightness, &value)) {
++        uint32_t max = std::stoul(android::base::Trim(value));
++        if (max > 0) return max;
++    }
++    return 0xFF;
++}
++
++// Same conversion as the old HIDL light@2.0 service for this device.
++uint32_t rgbToBrightness(uint32_t color) {
++    uint32_t alpha = (color >> 24) & 0xFF;
++    uint32_t red = (color >> 16) & 0xFF;
++    uint32_t green = (color >> 8) & 0xFF;
++    uint32_t blue = color & 0xFF;
++    if (alpha != 0xFF && alpha != 0) {
++        red = red * alpha / 0xFF;
++        green = green * alpha / 0xFF;
++        blue = blue * alpha / 0xFF;
++    }
++    return (77 * red + 150 * green + 29 * blue) >> 8;
++}
++
++uint32_t scaleBrightness(uint32_t brightness, uint32_t max) {
++    if (brightness == 0) return 0;
++    return (brightness - 1) * (max - 1) / (0xFF - 1) + 1;
++}
++
++class Lights : public BnLights {
++  public:
++    Lights() : mMaxBrightness(readMaxBrightness()) {}
++
++    ScopedAStatus setLightState(int32_t id, const HwLightState& state) override {
++        if (id != kBacklightId) return ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
++        uint32_t value = scaleBrightness(rgbToBrightness(state.color), mMaxBrightness);
++        std::lock_guard<std::mutex> lock(mLock);
++        if (!android::base::WriteStringToFile(std::to_string(value), kBrightness)) {
++            PLOG(ERROR) << "Failed to write " << value << " to " << kBrightness;
++        }
++        return ScopedAStatus::ok();
++    }
++
++    ScopedAStatus getLights(std::vector<HwLight>* lights) override {
++        lights->push_back({.id = kBacklightId, .ordinal = 0, .type = LightType::BACKLIGHT});
++        return ScopedAStatus::ok();
++    }
++
++  private:
++    const uint32_t mMaxBrightness;
++    std::mutex mLock;
++};
++
++}  // namespace
++
++int main() {
++    ABinderProcess_setThreadPoolMaxThreadCount(0);
++    std::shared_ptr<Lights> lights = ndk::SharedRefBase::make<Lights>();
++    const std::string instance = std::string(Lights::descriptor) + "/default";
++    binder_status_t status = AServiceManager_addService(lights->asBinder().get(), instance.c_str());
++    CHECK_EQ(status, STATUS_OK) << "Failed to register " << instance;
++    ABinderProcess_joinThreadPool();
++    return EXIT_FAILURE;  // should not reach
++}
 diff --git a/device.mk b/device.mk
-index 8799e24..720caac 100644
+index 8799e24..c02a1bb 100644
 --- a/device.mk
 +++ b/device.mk
 @@ -56,6 +56,10 @@ DEVICE_PACKAGE_OVERLAYS += \
@@ -94,7 +251,7 @@ index 8799e24..720caac 100644
  # WiFi
  PRODUCT_PACKAGES += \
      WifiOverlay \
-@@ -203,3 +203,11 @@ PRODUCT_COPY_FILES += \
+@@ -203,3 +203,23 @@ PRODUCT_COPY_FILES += \
  PRODUCT_PACKAGES += \
      libshim_showlogo \
      libshim_vtservice
@@ -102,6 +259,18 @@ index 8799e24..720caac 100644
 +# Local: audio HAL 5.0 client for the stock Android 10 vendor
 +PRODUCT_PACKAGES += \
 +    libaudiohal@5.0
++
++# Local: HIDL ashmem allocator (vendor PQ HAL allocates hidl_memory through it)
++PRODUCT_PACKAGES += \
++    android.hidl.allocator@1.0-service
++
++# Local: HIDL ashmem mapper (IMapper for hidl_memory from the allocator)
++PRODUCT_PACKAGES += \
++    android.hidl.memory@1.0-impl
++
++# AIDL lights (backlight) - A17 LightsService does not use HIDL light@2.0
++PRODUCT_PACKAGES += \
++    android.hardware.light-service.dandelion
 +
 +# A17 USB: the stock vendor usb rc restores sys.usb.config from sys.usb.state
 +PRODUCT_COPY_FILES += \
