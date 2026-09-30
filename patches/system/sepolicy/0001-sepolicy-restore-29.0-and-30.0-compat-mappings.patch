@@ -5,15 +5,19 @@ Android 17 ships mappings for vendor policy 31.0+ only; a stock Android 10 vendo
 Mapping files and module blocks are taken unchanged from Android 16
 (LineageOS 23.2) and chained onto 31.0.
 
+The 29.0/30.0 compat files also let every domain open /dev/ashmem (like the
+31.0-33.0 ones do); otherwise system_server, media and the HIDL allocator are
+denied under enforcing.
+
  Android.bp                          |   14 +
  compat/Android.bp                   |  154 +++
  private/compat/29.0/29.0.cil        | 1987 ++++++++++++++++++++++++++++++
- private/compat/29.0/29.0.compat.cil |   38 +
+ private/compat/29.0/29.0.compat.cil |   41 +
  private/compat/29.0/29.0.ignore.cil |  130 ++
  private/compat/30.0/30.0.cil        | 2284 +++++++++++++++++++++++++++++++++++
- private/compat/30.0/30.0.compat.cil |   39 +
+ private/compat/30.0/30.0.compat.cil |   42 +
  private/compat/30.0/30.0.ignore.cil |  159 +++
- 8 files changed, 4805 insertions(+)
+ 8 files changed, 4811 insertions(+)
 
 diff --git a/Android.bp b/Android.bp
 index 75ad9d9..6fee598 100644
@@ -2238,10 +2242,10 @@ index 0000000..408cf33
 +(typeattributeset zygote_tmpfs_29_0 (zygote_tmpfs))
 diff --git a/private/compat/29.0/29.0.compat.cil b/private/compat/29.0/29.0.compat.cil
 new file mode 100644
-index 0000000..2d37de6
+index 0000000..90ee2c1
 --- /dev/null
 +++ b/private/compat/29.0/29.0.compat.cil
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,41 @@
 +;; complement CIL file for compatibility between ToT policy and 29.0 vendors.
 +;; will be compiled along with other normal policy files, on 29.0 vendors.
 +;;
@@ -2280,6 +2284,9 @@ index 0000000..2d37de6
 +
 +(allow vendor_init debugfs_file_type (file (create getattr open read write setattr relabelfrom unlink map)))
 +(allow vendor_init debugfs_fs_type (file (open read setattr map)))
++
++;; Pre-V vendors: every domain may open /dev/ashmem (same as 31.0-33.0 compat)
++(allow domain ashmem_libcutils_device (chr_file (open)))
 diff --git a/private/compat/29.0/29.0.ignore.cil b/private/compat/29.0/29.0.ignore.cil
 new file mode 100644
 index 0000000..e40888d
@@ -4708,10 +4715,10 @@ index 0000000..f95488c
 +(typeattributeset zygote_tmpfs_30_0 (zygote_tmpfs))
 diff --git a/private/compat/30.0/30.0.compat.cil b/private/compat/30.0/30.0.compat.cil
 new file mode 100644
-index 0000000..c9c5f47
+index 0000000..6cac42c
 --- /dev/null
 +++ b/private/compat/30.0/30.0.compat.cil
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,42 @@
 +;; complement CIL file for compatibility between ToT policy and 30.0 vendors.
 +;; will be compiled along with other normal policy files, on 30.0 vendors.
 +;;
@@ -4751,6 +4758,9 @@ index 0000000..c9c5f47
 +
 +(allow vendor_init debugfs_file_type (file (create getattr open read write setattr relabelfrom unlink map)))
 +(allow vendor_init debugfs_fs_type (file (open read setattr map)))
++
++;; Pre-V vendors: every domain may open /dev/ashmem (same as 31.0-33.0 compat)
++(allow domain ashmem_libcutils_device (chr_file (open)))
 diff --git a/private/compat/30.0/30.0.ignore.cil b/private/compat/30.0/30.0.ignore.cil
 new file mode 100644
 index 0000000..1d3b389

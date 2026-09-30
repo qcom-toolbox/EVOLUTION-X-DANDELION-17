@@ -1,0 +1,45 @@
+AxSpoofManager: keep the real device identity without GMS
+
+The Play Integrity refresh stages a Pixel identity in persist.sys.pif.product.*,
+and bionic serves it for ro.product.* reads in app processes. On this device
+every app can read those props, so apps like Geekbench saw "Pixel 10 Pro XL".
+Without com.google.android.gms there is nothing to spoof for: clear the staging
+props and skip the refresh until GMS is installed.
+
+ .../java/com/android/server/spoof/AxSpoofManager.java    | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/services/core/java/com/android/server/spoof/AxSpoofManager.java b/services/core/java/com/android/server/spoof/AxSpoofManager.java
+index d4ba32ba4..67ea0d543 100644
+--- a/services/core/java/com/android/server/spoof/AxSpoofManager.java
++++ b/services/core/java/com/android/server/spoof/AxSpoofManager.java
+@@ -359,6 +359,15 @@ public class AxSpoofManager implements IAxSpoofManager {
+         return pifMissing || keyboxMissing;
+     }
+ 
++    private boolean isGmsInstalled() {
++        try {
++            mContext.getPackageManager().getPackageInfo("com.google.android.gms", 0);
++            return true;
++        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
++            return false;
++        }
++    }
++
+     private static boolean isEmpty(String s) {
+         return s == null || s.trim().isEmpty();
+     }
+@@ -399,6 +408,13 @@ public class AxSpoofManager implements IAxSpoofManager {
+                 mResolver, PIF_ENABLED_KEY, 1, UserHandle.USER_SYSTEM) == 0) {
+             return;
+         }
++        // Without GMS there is nothing to pass Play Integrity for, and on some
++        // devices every app can read the staging props, so they would all see
++        // the Pixel identity. Keep the real one until GMS is installed.
++        if (!isGmsInstalled()) {
++            clearProductPropOverrides();
++            return;
++        }
+ 
+         long lastFetch = Settings.Secure.getLongForUser(
+                 mResolver, LAST_AUTO_FETCH_KEY, 0L, UserHandle.USER_SYSTEM);

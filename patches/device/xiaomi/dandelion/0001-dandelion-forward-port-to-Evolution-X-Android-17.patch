@@ -17,9 +17,15 @@ Keeps the stock Android 10 vendor (BUILD_WITHOUT_VENDOR) and prebuilt 4.9 kernel
 - codecs: drop the A13 props that disabled Codec2 and forced OMX; rank the vendor
   OMX.google.* software codecs below Codec2
 - ro.bpf.allow_legacy_kernel, sys.usb.controller=musb-hdrc, USB state seed rc
-- A17 build.prop override keys (BuildDesc/BuildFingerprint)
+- Reports itself as Redmi 9A: PRODUCT_MODEL, ro.product.model/marketname (the A10
+  odm/vendor props say M2006C3LG); Evolution's Pixel fingerprint spoof and the old
+  raven fingerprint override are off
 - light HAL: drop removed <hardware/lights.h>; libshim_showlogo ported to A17 libgui
-- sepolicy: coredomain/system_file_type for system-side HALs, -isolated_app_all
+- sepolicy: coredomain/system_file_type for system-side HALs, -isolated_app_all;
+  hal_light_dandelion / hal_vibrator_dandelion domains for the AIDL services (they
+  ran as init before), health HAL read of the battery node, flags_health_check
+  property dontaudit; permissive recovery/kpoc_charger limited to userdebug/eng
+  (user builds refuse permissive domains). Works with SELinux enforcing
 - remove vendorsetup.sh (it deleted and re-cloned frameworks/opt/telephony)
 
  BoardConfig.mk                                     |  13 ++-
@@ -34,16 +40,24 @@ Keeps the stock Android 10 vendor (BUILD_WITHOUT_VENDOR) and prebuilt 4.9 kernel
  device.mk                                          |  36 +++++-
  libshims/libshim_showlogo.cpp                      |  37 ++++--
  light/Light.h                                      |   1 -
- lineage_dandelion.mk                               |  33 ++++--
+ lineage_dandelion.mk                               |  37 +++---
  rootdir/etc/init.dandelion.usb.rc                  |   6 +
  sepolicy/private/dt2w_event.te                     |   2 +-
+ sepolicy/private/file.te                           |   2 +
+ sepolicy/private/file_contexts                     |   4 +
+ sepolicy/private/flags_health_check.te             |   2 +
+ sepolicy/private/hal_health_default.te             |   8 ++
+ sepolicy/private/hal_light_dandelion.te            |  13 +++
  sepolicy/private/hal_mms_server.te                 |   4 +-
+ sepolicy/private/hal_vibrator_dandelion.te         |  12 ++
+ sepolicy/private/kpoc_charger.te                   |   3 +
  sepolicy/private/mtk_hal_light.te                  |   4 +-
  sepolicy/private/mtk_hal_mms.te                    |   2 +-
- system.prop                                        |  16 ++-
+ sepolicy/private/recovery.te                       |   4 +-
+ system.prop                                        |  20 +++-
  vendorsetup.sh                                     |   8 --
  vndk-compat/Android.bp                             |  14 +++
- 21 files changed, 415 insertions(+), 49 deletions(-)
+ 29 files changed, 468 insertions(+), 52 deletions(-)
 
 diff --git a/BoardConfig.mk b/BoardConfig.mk
 index 1a94791..9db5a10 100644
@@ -555,10 +569,10 @@ index 4427c39..6bb5e7b 100644
  #include <map>
  #include <mutex>
 diff --git a/lineage_dandelion.mk b/lineage_dandelion.mk
-index 6b70cc7..a1f5fd3 100644
+index 6b70cc7..e35ef72 100644
 --- a/lineage_dandelion.mk
 +++ b/lineage_dandelion.mk
-@@ -18,11 +18,25 @@
+@@ -18,11 +18,27 @@
  $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
  $(call inherit-product, $(SRC_TARGET_DIR)/product/aosp_base.mk)
  
@@ -576,6 +590,8 @@ index 6b70cc7..a1f5fd3 100644
 +TARGET_SUPPORTS_QUICK_TAP := false
 +TARGET_SUPPORTS_GFU := false
 +TARGET_ENABLE_BLUR := false
++# Report the real phone (Redmi 9A), not Evolution's Pixel fingerprint spoof
++TARGET_ENABLE_FP_OVERRIDE := false
 +
 +# Lineage / Evolution X stuff
 +$(call inherit-product, vendor/lineage/config/common_full_phone.mk)
@@ -589,13 +605,19 @@ index 6b70cc7..a1f5fd3 100644
  
  # Inherit from garden device makefile
  $(call inherit-product, $(LOCAL_PATH)/device.mk)
-@@ -37,12 +51,7 @@ PRODUCT_MANUFACTURER := xiaomi
+@@ -31,18 +47,11 @@ $(call inherit-product, $(LOCAL_PATH)/device.mk)
+ PRODUCT_NAME := lineage_dandelion
+ PRODUCT_DEVICE := dandelion
+ PRODUCT_BRAND := Redmi
+-PRODUCT_MANUFACTURER := xiaomi
++PRODUCT_MODEL := Redmi 9A
++PRODUCT_MANUFACTURER := Xiaomi
+ 
+ # Build info
  TARGET_VENDOR := xiaomi
  TARGET_VENDOR_PRODUCT_NAME := dandelion
- PRODUCT_BUILD_PROP_OVERRIDES += \
+-PRODUCT_BUILD_PROP_OVERRIDES += \
 -    PRIVATE_BUILD_DESC="raven-user 12 SP2A.220405.004 8233519 release-keys"
-+    BuildDesc="raven-user 12 SP2A.220405.004 8233519 release-keys" \
-+    BuildFingerprint=google/raven/raven:12/SP2A.220405.004/8233519:user/release-keys
  
  PRODUCT_GMS_CLIENTID_BASE := android-xiaomi
 -
@@ -626,6 +648,71 @@ index cc88686..f9a21c6 100644
  type dt2w_event_exec, exec_type, system_file_type, file_type;
  
  init_daemon_domain(dt2w_event)
+diff --git a/sepolicy/private/file.te b/sepolicy/private/file.te
+index cd40cf7..4006f2b 100644
+--- a/sepolicy/private/file.te
++++ b/sepolicy/private/file.te
+@@ -13,3 +13,5 @@ type sysfs_usb_supply, fs_type, sysfs_type;
+ type debugfs_ion, fs_type, debugfs_type;
+ type debugfs_ion_mm_heap, fs_type, debugfs_type;
+ type sysfs_fps, sysfs_type, fs_type;
++# Declared by the MTK vendor policy too (secilc -m merges them); lcd-backlight/brightness
++type sysfs_led, fs_type, sysfs_type;
+diff --git a/sepolicy/private/file_contexts b/sepolicy/private/file_contexts
+index 245737c..2363f0f 100644
+--- a/sepolicy/private/file_contexts
++++ b/sepolicy/private/file_contexts
+@@ -20,3 +20,7 @@
+ 
+ # VoLTE
+ /system/bin/vtservice           u:object_r:vtservice_exec:s0
++
++# AIDL HALs (Android 17 dropped the HIDL light/vibrator clients)
++/(system_ext|system/system_ext)/bin/hw/android\.hardware\.light-service\.dandelion       u:object_r:hal_light_dandelion_exec:s0
++/(system_ext|system/system_ext)/bin/hw/android\.hardware\.vibrator-service\.dandelion    u:object_r:hal_vibrator_dandelion_exec:s0
+diff --git a/sepolicy/private/flags_health_check.te b/sepolicy/private/flags_health_check.te
+index 9b08585..a6eb250 100644
+--- a/sepolicy/private/flags_health_check.te
++++ b/sepolicy/private/flags_health_check.te
+@@ -2,3 +2,5 @@ allow flags_health_check aac_drc_prop:file { open getattr };
+ allow flags_health_check ab_update_gki_prop:file { open getattr };
+ allow flags_health_check adbd_config_prop:file { open getattr };
+ allow flags_health_check ctl_adbd_prop:file open;
++# It walks every property; the ones it can't read don't matter
++dontaudit flags_health_check property_type:file { read open getattr map };
+diff --git a/sepolicy/private/hal_health_default.te b/sepolicy/private/hal_health_default.te
+new file mode 100644
+index 0000000..a38d37b
+--- /dev/null
++++ b/sepolicy/private/hal_health_default.te
+@@ -0,0 +1,8 @@
++# Stock Android 10 health HAL (a vendor domain; declared here too, secilc -m
++# merges it with the vendor's) reads the MTK battery node labeled above.
++# Recovery policy already has the platform's vendor/hal_health_default.te.
++not_recovery(`
++type hal_health_default;
++')
++allow hal_health_default sysfs_battery_supply:dir r_dir_perms;
++allow hal_health_default sysfs_battery_supply:file r_file_perms;
+diff --git a/sepolicy/private/hal_light_dandelion.te b/sepolicy/private/hal_light_dandelion.te
+new file mode 100644
+index 0000000..9614036
+--- /dev/null
++++ b/sepolicy/private/hal_light_dandelion.te
+@@ -0,0 +1,13 @@
++# AIDL backlight service (aidl-light), runs from system_ext
++type hal_light_dandelion, domain, coredomain;
++type hal_light_dandelion_exec, exec_type, system_file_type, file_type;
++init_daemon_domain(hal_light_dandelion)
++hal_server_domain(hal_light_dandelion, hal_light)
++binder_use(hal_light_dandelion)
++
++# /sys/class/leds/lcd-backlight -> leds-mt65xx; brightness is sysfs_led (vendor label)
++allow hal_light_dandelion sysfs:dir r_dir_perms;
++allow hal_light_dandelion sysfs:lnk_file read;
++allow hal_light_dandelion sysfs_leds:dir r_dir_perms;
++allow hal_light_dandelion sysfs_leds:lnk_file read;
++allow hal_light_dandelion { sysfs_leds sysfs_led }:file rw_file_perms;
 diff --git a/sepolicy/private/hal_mms_server.te b/sepolicy/private/hal_mms_server.te
 index 4419036..28ae852 100644
 --- a/sepolicy/private/hal_mms_server.te
@@ -638,6 +725,39 @@ index 4419036..28ae852 100644
 +binder_call({appdomain -isolated_app_all}, hal_mms_server)
 +binder_call(hal_mms_server, {appdomain -isolated_app_all})
 \ No newline at end of file
+diff --git a/sepolicy/private/hal_vibrator_dandelion.te b/sepolicy/private/hal_vibrator_dandelion.te
+new file mode 100644
+index 0000000..a52f1cd
+--- /dev/null
++++ b/sepolicy/private/hal_vibrator_dandelion.te
+@@ -0,0 +1,12 @@
++# AIDL vibrator service (aidl-vibrator), runs from system_ext
++type hal_vibrator_dandelion, domain, coredomain;
++type hal_vibrator_dandelion_exec, exec_type, system_file_type, file_type;
++init_daemon_domain(hal_vibrator_dandelion)
++hal_server_domain(hal_vibrator_dandelion, hal_vibrator)
++binder_use(hal_vibrator_dandelion)
++
++# /sys/class/leds/vibrator -> odm:vibrator@0/leds/vibrator
++allow hal_vibrator_dandelion sysfs:dir r_dir_perms;
++allow hal_vibrator_dandelion sysfs:lnk_file read;
++allow hal_vibrator_dandelion sysfs_vibrator:dir r_dir_perms;
++allow hal_vibrator_dandelion sysfs_vibrator:file rw_file_perms;
+diff --git a/sepolicy/private/kpoc_charger.te b/sepolicy/private/kpoc_charger.te
+index 4f2bbc0..9c831da 100644
+--- a/sepolicy/private/kpoc_charger.te
++++ b/sepolicy/private/kpoc_charger.te
+@@ -6,7 +6,10 @@ typeattribute kpoc_charger coredomain;
+ 
+ init_daemon_domain(kpoc_charger)
+ 
++# The binary isn't shipped on A17 builds; user builds forbid permissive domains
++userdebug_or_eng(`
+ permissive kpoc_charger;
++')
+ 
+ # Allow kpoc_charger to access hal_light
+ hal_client_domain(kpoc_charger, hal_light)
 diff --git a/sepolicy/private/mtk_hal_light.te b/sepolicy/private/mtk_hal_light.te
 index cd3d096..1bb2800 100644
 --- a/sepolicy/private/mtk_hal_light.te
@@ -660,8 +780,21 @@ index 6ff9080..6c01cf2 100644
  
 -allow { appdomain -isolated_app }  mtk_hal_mms_hwservice:hwservice_manager find;
 +allow { appdomain -isolated_app_all }  mtk_hal_mms_hwservice:hwservice_manager find;
+diff --git a/sepolicy/private/recovery.te b/sepolicy/private/recovery.te
+index 254a6c9..9ba6d75 100644
+--- a/sepolicy/private/recovery.te
++++ b/sepolicy/private/recovery.te
+@@ -1,5 +1,7 @@
+-# Set recovery to permissive
++# Set recovery to permissive (debug builds only; user builds forbid permissive domains)
+ recovery_only(`
++userdebug_or_eng(`
+     permissive init;
+     permissive recovery;
+ ')
++')
 diff --git a/system.prop b/system.prop
-index fe36936..6fc9723 100644
+index fe36936..7d089d7 100644
 --- a/system.prop
 +++ b/system.prop
 @@ -12,6 +12,9 @@ Build.BRAND=MTK
@@ -674,7 +807,18 @@ index fe36936..6fc9723 100644
  # Camera
  persist.camera.HAL3.enabled=1
  persist.vendor.camera.privapp.list=org.codeaurora.snapcam,com.android.camera,com.google.camera
-@@ -103,10 +106,7 @@ ro.zram.mark_idle_delay_mins=60
+@@ -56,6 +59,10 @@ media.stagefright.thumbnail.prefer_hw_codecs=true
+ # Order
+ ro.product.property_source_order=odm,vendor,product,system
+ 
++# Name (the Android 10 odm/vendor props say M2006C3LG)
++ro.product.model=Redmi 9A
++ro.product.marketname=Redmi 9A
++
+ # Perf
+ ro.am.reschedule_service=true
+ ro.mtk_perf_fast_start_win=1
+@@ -103,10 +110,7 @@ ro.zram.mark_idle_delay_mins=60
  ro.zram.first_wb_delay_mins=1440
  ro.zram.periodic_wb_delay_hours=24
  
@@ -686,7 +830,7 @@ index fe36936..6fc9723 100644
  
  # Blurs
  ro.surface_flinger.supports_background_blur=1
-@@ -229,3 +229,11 @@ ro.com.google.ime.corner_key_r=35
+@@ -229,3 +233,11 @@ ro.com.google.ime.corner_key_r=35
  persist.dbg.volte_avail_ovr=1
  persist.dbg.vt_avail_ovr=1
  persist.dbg.wfc_avail_ovr=1
